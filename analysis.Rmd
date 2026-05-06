@@ -243,6 +243,9 @@ cat("\n=== Differences Needed ===\n")
 cat("Regular differences:  ", ndiff_hydro$ndiffs, "\n")
 cat("Seasonal differences: ", nsdiff_hydro$nsdiffs, "\n")
 ```
+
+
+**Interpretation**
 The ADF and KPSS stationarity tests produced conflicting results for both series, with the ADF rejecting non-stationarity (p = 0.01) while the KPSS simultaneously rejected stationarity (p = 0.01). This apparent contradiction is best explained by the strong seasonal pattern already visible in the ACF — the series does not contain a permanent trend or random walk, satisfying the ADF, but its persistent annual cycle creates a form of seasonal non-stationarity that the KPSS detects. This is confirmed by the automatic differencing tests, which recommend applying both one regular difference and one seasonal difference before modelling.
 ---
 
@@ -269,7 +272,7 @@ share %>%
            hjust = 0, colour = "steelblue")
 ```
 
-> Norway's hydro share hovers around **90–95%** on average, with dips in dry years when thermal/wind backup is needed.
+Norway's hydro share hovers around **90–95%** on average, with dips in dry years when thermal/wind backup is needed.
 
 ---
 
@@ -290,10 +293,37 @@ hydro %>%
   )
 ```
 
-λ is close to 1, little transformation is needed — the variance is already stable.  
 
 
----
+Checking more:
+
+```{r transformation2}
+# Check if a log or Box-Cox transformation stabilises variance
+lambda <- hydro %>%
+  features(MWh, features = guerrero)
+lambda
+
+# Get 90% CI for lambda using guerrero with CI bounds
+lambda_ci <- hydro %>%
+  features(MWh, ~ guerrero(., .period = frequency(.), lower_limit = -1, upper_limit = 2))
+
+# Alternatively, use the MASS package to get Box-Cox CI directly
+library(MASS)
+
+bc <- boxcox(
+  lm(MWh ~ 1, data = as.data.frame(hydro)),
+  lambda = seq(-2, 2, by = 0.01),
+  plotit = TRUE  # This plots the log-likelihood with 90% CI lines
+)
+
+# Extract the 90% CI bounds
+ci_bounds <- bc$x[bc$y >= max(bc$y) - qchisq(0.90, 1) / 2]
+cat("90% CI for lambda: [", min(ci_bounds), ",", max(ci_bounds), "]\n")
+cat("Lambda = 1 is within CI:", min(ci_bounds) <= 1 & 1 <= max(ci_bounds), "\n")
+```
+
+
+**Interpretation**: The Guerrero method suggested λ = 1.46, however a Box-Cox 90% confidence interval of [0.49, 1.23] includes λ = 1, indicating that no transformation is statistically necessary. The original MWh scale is retained for interpretability.
 
 ## 9. STL Decomposition
 
