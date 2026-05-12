@@ -7,6 +7,10 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+#Clean theenvironment.
+rm(list=ls())
+
 library(fpp3)
 library(readr)
 library(tidyr)
@@ -15,13 +19,18 @@ library(stringr)
 library(lubridate)
 library(tseries)
 library(strucchange)
-library(knitr) 
+library(knitr)
+library(forecast)
+library(gets)
+library(lmtest)
 ```
 
 ## 1. Load and Prepare the Data
 ```{r load-data}
+setwd("~/Flor - CBS/Semester 4/Predictive Analytics/Assingments/FA/Hydro")
+
 # Read the raw file first to see exact column names
-raw <- read_delim("data/hydro-dataset.csv", 
+raw <- read_delim("hydro-dataset.csv", 
                   delim = ";", 
                   skip = 1,
                   col_names = TRUE)
@@ -66,18 +75,44 @@ cat("\nDate range:",
 ```
 
 ```{r split-tsibbles}
+#converting to tsibble and to TWh
 total_elec <- long %>%
   filter(grepl("Total", series)) %>%
   select(Month, MWh) %>%
+  mutate(TWh = MWh / 1e6) %>%        # Add TWh
+  select(Month, TWh) %>%             # Drop MWh
   as_tsibble(index = Month)
 
 hydro <- long %>%
   filter(grepl("Hydro", series)) %>%
   select(Month, MWh) %>%
+  mutate(TWh = MWh / 1e6) %>%        # Add TWh
+  select(Month, TWh) %>%             # Drop MWh
   as_tsibble(index = Month)
 
-total_elec
-hydro
+
+# Inspect the top of total_elec.
+head(total_elec) %>%
+kable(align = 'c')
+
+# Inspect the top of hydro.
+head(hydro) %>%
+kable(align = 'c')
+
+
+
+```
+```{r descriptives}
+summary(hydro$TWh)
+
+range(hydro$TWh)
+range(hydro$Month)
+
+#checking for gaps
+has_gaps(hydro)
+scan_gaps(hydro)
+has_gaps(total_elec)
+scan_gaps(total_elec)
 ```
 
 
@@ -87,22 +122,22 @@ hydro
 
 ```{r timeplot-total}
 total_elec %>%
-  autoplot(MWh) +
+  autoplot(TWh) +
   labs(
     title = "Total Electricity Generation in Norway",
     subtitle = "May 1993 – March 2026",
-    y = "MWh",
+    y = "TWh",
     x = NULL
   )
 ```
 
 ```{r timeplot-hydro}
 hydro %>%
-  autoplot(MWh) +
+  autoplot(TWh) +
   labs(
     title = "Hydro Power Generation in Norway",
     subtitle = "May 1993 – March 2026",
-    y = "MWh",
+    y = "TWh",
     x = NULL
   )
 ```
@@ -110,12 +145,15 @@ hydro %>%
 ```{r timeplot-both}
 # Plot both series together for comparison
 long %>%
-  mutate(Month = yearmonth(Month)) %>%
+  mutate(
+    Month = yearmonth(Month),
+    TWh = MWh / 1e6                        
+  ) %>%
   as_tsibble(index = Month, key = series) %>%
-  autoplot(MWh) +
+  autoplot(TWh) +
   labs(
     title = "Norway: Total vs Hydro Electricity Generation",
-    y = "MWh", x = NULL
+    y = "TWh", x = NULL
   ) +
   theme(legend.position = "bottom")
 ```
@@ -124,6 +162,7 @@ long %>%
 > - Strong seasonal pattern in both series (high in winter, low in summer — Norway's hydro reservoirs fill in spring/summer but demand peaks in cold months).  
 > - No obvious long-run trend; production fluctuates around a relatively stable level.  
 > - Hydro tracks Total very closely, confirming hydro dominates Norwegian electricity generation.
+> - Slight upward trend
 
 ---
 
@@ -131,19 +170,19 @@ long %>%
 
 ```{r seasonal-total}
 total_elec %>%
-  gg_season(MWh, labels = "both") +
+  gg_season(TWh, labels = "both") +
   labs(
     title = "Seasonal Plot: Total Electricity Generation",
-    y = "MWh"
+    y = "TWh"
   )
 ```
 
 ```{r seasonal-hydro}
 hydro %>%
-  gg_season(MWh, labels = "both") +
+  gg_season(TWh, labels = "both") +
   labs(
     title = "Seasonal Plot: Hydro Power Generation",
-    y = "MWh"
+    y = "TWh"
   )
 ```
 
@@ -154,41 +193,44 @@ hydro %>%
 
 ---
 
-## 4. Subseries Plots
+## 4. Seasonal Subseries Plots
 
 ```{r subseries-total}
 total_elec %>%
-  gg_subseries(MWh) +
+  gg_subseries(TWh) +
   labs(
     title = "Subseries Plot: Total Electricity Generation",
-    y = "MWh"
-  )
+    y = "TWh") +
+  theme(plot.title = element_text(hjust = 0.5))
 ```
 
 ```{r subseries-hydro}
 hydro %>%
-  gg_subseries(MWh) +
+  gg_subseries(TWh) +
   labs(
     title = "Subseries Plot: Hydro Power Generation",
-    y = "MWh"
-  )
+    y = "TWh") +
+  theme(plot.title = element_text(hjust = 0.5))
 ```
 
 > **Interpretation:**  
-> - Blue horizontal lines show each month's mean — clearly higher in winter months.  
+> - Blue horizontal lines show each month's mean — clearly higher in winter months, but stable over time.   
 > - Within-month trends appear relatively flat, suggesting no strong long-term directional change in any particular month.
 
+> **Comparison**
+> - Both move together with consistent seasonality, but Hydro is more volatile.
 ---
 
 ## 5. Lag Plots
 
 ```{r lag-hydro}
 hydro %>%
-  gg_lag(MWh, geom = "point", lags = 1:12) +
+  gg_lag(TWh, geom = "point", lags = 1:12) +
   labs(title = "Lag Plot: Hydro Power Generation")
 ```
 
 > **Interpretation:**  
+> - Strong positive autocorrelation in lags 1-4
 > - Strong positive correlation at **lag 12**, confirming annual seasonality.  
 > - Lag 6 shows weaker/negative correlation — opposite season.
 
@@ -199,13 +241,13 @@ hydro %>%
 
 ```{r acf-pacf-total}
 total_elec %>%
-  gg_tsdisplay(MWh, plot_type = "partial", lag_max = 48) +
+  gg_tsdisplay(TWh, plot_type = "partial", lag_max = 48) +
   labs(title = "ACF & PACF: Total Electricity Generation")
 ```
 
 ```{r acf-pacf-hydro}
 hydro %>%
-  gg_tsdisplay(MWh, plot_type = "partial", lag_max = 48) +
+  gg_tsdisplay(TWh, plot_type = "partial", lag_max = 48) +
   labs(title = "ACF & PACF: Hydro Power Generation")
 ```
 
@@ -243,9 +285,6 @@ cat("\n=== Differences Needed ===\n")
 cat("Regular differences:  ", ndiff_hydro$ndiffs, "\n")
 cat("Seasonal differences: ", nsdiff_hydro$nsdiffs, "\n")
 ```
-
-
-**Interpretation**
 The ADF and KPSS stationarity tests produced conflicting results for both series, with the ADF rejecting non-stationarity (p = 0.01) while the KPSS simultaneously rejected stationarity (p = 0.01). This apparent contradiction is best explained by the strong seasonal pattern already visible in the ACF — the series does not contain a permanent trend or random walk, satisfying the ADF, but its persistent annual cycle creates a form of seasonal non-stationarity that the KPSS detects. This is confirmed by the automatic differencing tests, which recommend applying both one regular difference and one seasonal difference before modelling.
 ---
 
@@ -253,8 +292,8 @@ The ADF and KPSS stationarity tests produced conflicting results for both series
 
 ```{r hydro-share}
 share <- inner_join(
-  total_elec %>% rename(total = MWh),
-  hydro       %>% rename(hydro  = MWh),
+  total_elec %>% rename(total = TWh),
+  hydro       %>% rename(hydro  = TWh),
   by = "Month"
 ) %>%
   mutate(hydro_share = hydro / total * 100)
@@ -272,7 +311,7 @@ share %>%
            hjust = 0, colour = "steelblue")
 ```
 
-Norway's hydro share hovers around **90–95%** on average, with dips in dry years when thermal/wind backup is needed.
+> Norway's hydro share hovers around **90–95%** on average, with dips in dry years when thermal/wind backup is needed.
 
 ---
 
@@ -281,55 +320,28 @@ Norway's hydro share hovers around **90–95%** on average, with dips in dry yea
 ```{r transformation}
 # Check if a log or Box-Cox transformation stabilises variance
 lambda <- hydro %>%
-  features(MWh, features = guerrero)
+  features(TWh, features = guerrero)
 lambda
 
 hydro %>%
-  autoplot(box_cox(MWh, lambda$lambda_guerrero)) +
+  autoplot(box_cox(TWh, lambda$lambda_guerrero)) +
   labs(
     title = paste0("Hydro Generation — Box-Cox (λ = ",
                    round(lambda$lambda_guerrero, 3), ")"),
-    y = "Transformed MWh"
+    y = "Transformed TWh"
   )
 ```
 
+λ is close to 1, little transformation is needed — the variance is already stable.  
 
 
-Checking more:
-
-```{r transformation2}
-# Check if a log or Box-Cox transformation stabilises variance
-lambda <- hydro %>%
-  features(MWh, features = guerrero)
-lambda
-
-# Get 90% CI for lambda using guerrero with CI bounds
-lambda_ci <- hydro %>%
-  features(MWh, ~ guerrero(., .period = frequency(.), lower_limit = -1, upper_limit = 2))
-
-# Alternatively, use the MASS package to get Box-Cox CI directly
-library(MASS)
-
-bc <- boxcox(
-  lm(MWh ~ 1, data = as.data.frame(hydro)),
-  lambda = seq(-2, 2, by = 0.01),
-  plotit = TRUE  # This plots the log-likelihood with 90% CI lines
-)
-
-# Extract the 90% CI bounds
-ci_bounds <- bc$x[bc$y >= max(bc$y) - qchisq(0.90, 1) / 2]
-cat("90% CI for lambda: [", min(ci_bounds), ",", max(ci_bounds), "]\n")
-cat("Lambda = 1 is within CI:", min(ci_bounds) <= 1 & 1 <= max(ci_bounds), "\n")
-```
-
-
-**Interpretation**: The Guerrero method suggested λ = 1.46, however a Box-Cox 90% confidence interval of [0.49, 1.23] includes λ = 1, indicating that no transformation is statistically necessary. The original MWh scale is retained for interpretability.
+---
 
 ## 9. STL Decomposition
 
 ```{r stl-total}
 total_elec %>%
-  model(STL(MWh ~ trend(window = 13) + season(window = "periodic"))) %>%
+  model(STL(TWh ~ trend(window = 13) + season(window = "periodic"))) %>%
   components() %>%
   autoplot() +
   labs(title = "STL Decomposition: Total Electricity Generation")
@@ -337,7 +349,7 @@ total_elec %>%
 
 ```{r stl-hydro}
 hydro %>%
-  model(STL(MWh ~ trend(window = 13) + season(window = "periodic"))) %>%
+  model(STL(TWh ~ trend(window = 13) + season(window = "periodic"))) %>%
   components() %>%
   autoplot() +
   labs(title = "STL Decomposition: Hydro Power Generation")
@@ -491,6 +503,30 @@ if (chow_total$p.value < 0.05) {
 }
 ```
 
+```{r}
+# Correct way to mark a yearmonth position in ggplot2
+hydro |>
+  autoplot(MWh) +
+  geom_vline(
+    xintercept = yearmonth("1996 Apr"),  # no as.numeric() needed
+    color = "red", linetype = "dashed", linewidth = 0.8
+  ) +
+  annotate(
+    "text",
+    x = yearmonth("1997 Jan"),           # offset label to the right
+    y = 15500000,
+    label = "Obs. 40\n(1996 Apr)",
+    color = "red",
+    hjust = 0
+  ) +
+  labs(
+    title = "Hydro Power Generation — Level Shift at Obs. 40",
+    y = "MWh",
+    x = "Month"
+  )
+```
+
+
 ---
 
 ### 11.3 The Automated Sup-F (QLR) Test
@@ -589,3 +625,42 @@ cat("Files saved successfully!\n")
 cat("- total_electricity_norway.csv\n")
 cat("- hydro_norway.csv\n")
 ```
+
+
+
+## log transformation
+
+```{r log-transform}
+hydro <- hydro |>
+  mutate(log_MWh = log(MWh))
+```
+
+```{r log-visual}
+# Visual check: does log transform stabilise the variance?
+hydro |>
+  autoplot(log_MWh) +
+  labs(
+    title = "Log-Transformed: Hydro Power Generation",
+    y = "log(MWh)"
+  )
+```
+
+
+## STL decomposition
+
+```{r stl-decomp}
+
+hydro_stl <- hydro |>
+  model(
+    STL(log_MWh ~ trend(window = 21) +
+          season(window = "periodic"),
+        robust = TRUE)
+  )
+ 
+# Plot the decomposition
+hydro_stl |>
+  components() |>
+  autoplot() +
+  labs(title = "STL Decomposition (log scale): Hydro Power Generation")
+```
+
