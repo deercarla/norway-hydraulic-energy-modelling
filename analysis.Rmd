@@ -27,10 +27,8 @@ library(lmtest)
 
 ## 1. Load and Prepare the Data
 ```{r load-data}
-setwd("~/Flor - CBS/Semester 4/Predictive Analytics/Assingments/FA/Hydro")
-
 # Read the raw file first to see exact column names
-raw <- read_delim("hydro-dataset.csv", 
+raw <- read_delim("data/hydro-dataset.csv", 
                   delim = ";", 
                   skip = 1,
                   col_names = TRUE)
@@ -52,7 +50,7 @@ long <- raw %>%
   pivot_longer(
     cols      = -series,
     names_to  = "month_raw",
-    values_to = "MWh"
+    values_to = "TWh"
   ) %>%
   mutate(
     # Extract "1993M01" pattern from column name
@@ -60,10 +58,10 @@ long <- raw %>%
     year_part  = as.integer(substr(month_code, 1, 4)),
     mon_part   = as.integer(substr(month_code, 6, 7)),
     Month      = yearmonth(make_date(year_part, mon_part, 1)),
-    MWh        = as.numeric(MWh)
+    TWh        = as.numeric(TWh)
   ) %>%
-  filter(!is.na(Month), !is.na(MWh)) %>%
-  select(series, Month, MWh)
+  filter(!is.na(Month), !is.na(TWh)) %>%
+  select(series, Month, TWh)
 
 # Verify
 print(long, n = 10)
@@ -78,16 +76,16 @@ cat("\nDate range:",
 #converting to tsibble and to TWh
 total_elec <- long %>%
   filter(grepl("Total", series)) %>%
-  select(Month, MWh) %>%
-  mutate(TWh = MWh / 1e6) %>%        # Add TWh
-  select(Month, TWh) %>%             # Drop MWh
+  select(Month, TWh) %>%
+  mutate(TWh = TWh / 1e6) %>%        # Add TWh
+  select(Month, TWh) %>%             # Drop TWh
   as_tsibble(index = Month)
 
 hydro <- long %>%
   filter(grepl("Hydro", series)) %>%
-  select(Month, MWh) %>%
-  mutate(TWh = MWh / 1e6) %>%        # Add TWh
-  select(Month, TWh) %>%             # Drop MWh
+  select(Month, TWh) %>%
+  mutate(TWh = TWh / 1e6) %>%        # Add TWh
+  select(Month, TWh) %>%             # Drop TWh
   as_tsibble(index = Month)
 
 
@@ -147,7 +145,7 @@ hydro %>%
 long %>%
   mutate(
     Month = yearmonth(Month),
-    TWh = MWh / 1e6                        
+    TWh = TWh / 1e6                        
   ) %>%
   as_tsibble(index = Month, key = series) %>%
   autoplot(TWh) +
@@ -260,8 +258,8 @@ The ACF and PACF plots reveal the core structure of Norwegian hydro power genera
 # --- ADF Test ---
 # H0: non-stationary (has unit root)
 # p < 0.05 → reject H0 → stationary
-adf_hydro <- adf.test(hydro$MWh)
-adf_total <- adf.test(total_elec$MWh)
+adf_hydro <- adf.test(hydro$TWh)
+adf_total <- adf.test(total_elec$TWh)
 
 cat("=== ADF Test ===\n")
 cat("Hydro:  p-value =", round(adf_hydro$p.value, 4), "\n")
@@ -270,16 +268,16 @@ cat("Total:  p-value =", round(adf_total$p.value, 4), "\n")
 # --- KPSS Test ---
 # H0: stationary
 # p < 0.05 → reject H0 → non-stationary
-kpss_hydro <- hydro %>% features(MWh, unitroot_kpss)
-kpss_total <- total_elec %>% features(MWh, unitroot_kpss)
+kpss_hydro <- hydro %>% features(TWh, unitroot_kpss)
+kpss_total <- total_elec %>% features(TWh, unitroot_kpss)
 
 cat("\n=== KPSS Test ===\n")
 print(kpss_hydro)
 print(kpss_total)
 
 # --- How many differences needed? ---
-ndiff_hydro <- hydro %>% features(MWh, unitroot_ndiffs)
-nsdiff_hydro <- hydro %>% features(MWh, unitroot_nsdiffs)
+ndiff_hydro <- hydro %>% features(TWh, unitroot_ndiffs)
+nsdiff_hydro <- hydro %>% features(TWh, unitroot_nsdiffs)
 
 cat("\n=== Differences Needed ===\n")
 cat("Regular differences:  ", ndiff_hydro$ndiffs, "\n")
@@ -371,7 +369,7 @@ hydro %>%
   as_tibble() %>%
   group_by(Year) %>%
   summarise(
-    Annual_GWh = sum(MWh, na.rm = TRUE) / 1000,
+    Annual_GWh = sum(TWh, na.rm = TRUE) / 1000,
     .groups = "drop"
   ) %>%
   ggplot(aes(x = Year, y = Annual_GWh)) +
@@ -401,7 +399,7 @@ data (default window size = 5 periods).
 ```{r shift-level-hydro}
 # Find the largest level shift in hydro generation
 shift_hydro <- hydro %>%
-  features(MWh, features = list(shift_level_max))
+  features(TWh, features = list(shift_level_max))
 
 print(shift_hydro)
 
@@ -418,7 +416,7 @@ hydro %>%
 ```{r shift-level-total}
 # Find the largest level shift in total electricity
 shift_total <- total_elec %>%
-  features(MWh, features = list(shift_level_max))
+  features(TWh, features = list(shift_level_max))
 
 print(shift_total)
 
@@ -450,12 +448,12 @@ between the two models, this is evidence for a structural break.
 # Prepare data with a lagged variable for the regression
 hydro_df <- hydro %>%
   as_tibble() %>%
-  mutate(Lag1 = lag(MWh)) %>%
+  mutate(Lag1 = lag(TWh)) %>%
   filter(!is.na(Lag1))
 
 # Define the regression formula
 # Is this month explained by last month?
-reg_formula_hydro <- MWh ~ Lag1
+reg_formula_hydro <- TWh ~ Lag1
 
 # Run Chow test at the detected break point
 chow_hydro <- sctest(
@@ -480,10 +478,10 @@ if (chow_hydro$p.value < 0.05) {
 # Prepare total electricity data
 total_df <- total_elec %>%
   as_tibble() %>%
-  mutate(Lag1 = lag(MWh)) %>%
+  mutate(Lag1 = lag(TWh)) %>%
   filter(!is.na(Lag1))
 
-reg_formula_total <- MWh ~ Lag1
+reg_formula_total <- TWh ~ Lag1
 
 chow_total <- sctest(
   reg_formula_total,
@@ -506,7 +504,7 @@ if (chow_total$p.value < 0.05) {
 ```{r}
 # Correct way to mark a yearmonth position in ggplot2
 hydro |>
-  autoplot(MWh) +
+  autoplot(TWh) +
   geom_vline(
     xintercept = yearmonth("1996 Apr"),  # no as.numeric() needed
     color = "red", linetype = "dashed", linewidth = 0.8
@@ -521,7 +519,7 @@ hydro |>
   ) +
   labs(
     title = "Hydro Power Generation — Level Shift at Obs. 40",
-    y = "MWh",
+    y = "TWh",
     x = "Month"
   )
 ```
@@ -632,16 +630,16 @@ cat("- hydro_norway.csv\n")
 
 ```{r log-transform}
 hydro <- hydro |>
-  mutate(log_MWh = log(MWh))
+  mutate(log_TWh = log(TWh))
 ```
 
 ```{r log-visual}
 # Visual check: does log transform stabilise the variance?
 hydro |>
-  autoplot(log_MWh) +
+  autoplot(log_TWh) +
   labs(
     title = "Log-Transformed: Hydro Power Generation",
-    y = "log(MWh)"
+    y = "log(TWh)"
   )
 ```
 
@@ -652,7 +650,7 @@ hydro |>
 
 hydro_stl <- hydro |>
   model(
-    STL(log_MWh ~ trend(window = 21) +
+    STL(log_TWh ~ trend(window = 21) +
           season(window = "periodic"),
         robust = TRUE)
   )
