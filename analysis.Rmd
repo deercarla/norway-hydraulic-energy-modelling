@@ -770,6 +770,9 @@ The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] mod
 
 **All MASE values are below 1**, confirming that every model outperforms the naïve seasonal benchmark (repeat last year's value). The winning Airline model achieves a MAPE of 5.1%, meaning forecasts are on average 5.1% off — a reasonable result for a 24-month horizon on a weather-dependent series.
 
+
+# Adding new data: ARIMAX
+
 ---
 
 # Appendix — Save Processed Data
