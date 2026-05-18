@@ -11,7 +11,7 @@
 
 <meta name="author" content="Carla de Erausquin" />
 
-<meta name="date" content="2026-05-12" />
+<meta name="date" content="2026-05-18" />
 
 <title>Norwegian Hydro Power Generation — Forecasting Analysis</title>
 
@@ -1588,7 +1588,7 @@ border-radius: 0px;
 <h1 class="title toc-ignore">Norwegian Hydro Power Generation —
 Forecasting Analysis</h1>
 <h4 class="author">Carla de Erausquin</h4>
-<h4 class="date">2026-05-12</h4>
+<h4 class="date">2026-05-18</h4>
 
 </div>
 
@@ -1973,6 +1973,24 @@ drought years.</li>
 observations when estimating the trend, preventing them from distorting
 the decomposition.</li>
 </ul>
+<p>To verify the decomposition is adequate, the ACF of the remainder is
+inspected. Residual autocorrelation would suggest the trend or seasonal
+windows require adjustment.</p>
+<pre class="r"><code>hydro_stl %&gt;%
+  components() %&gt;%
+  pull(remainder) %&gt;%
+  Box.test(lag = 24, type = &quot;Ljung-Box&quot;)</code></pre>
+<pre><code>## 
+##  Box-Ljung test
+## 
+## data:  .
+## X-squared = 261.72, df = 24, p-value &lt; 2.2e-16</code></pre>
+<p>A Ljung-Box test applied to the STL remainder (lag = 24) yields X² =
+261.72 (p &lt; 0.001), decisively rejecting white noise. This indicates
+that systematic variation remains after trend and seasonal extraction,
+consistent with the influence of inter-annual precipitation variability
+— motivating the inclusion of precipitation as an exogenous regressor in
+the ARIMAX specification.</p>
 <hr />
 </div>
 </div>

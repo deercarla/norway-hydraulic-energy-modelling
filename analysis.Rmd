@@ -279,12 +279,29 @@ hydro_stl %>%
        subtitle = "log_TWh = trend + season_year + remainder")
 ```
 
+
+
 **Interpretation:**
 
 - The **trend** is non-linear and non-monotonic — rising toward 2010, dipping, then recovering — reflecting capacity changes and hydrological cycles.
 - The **seasonal** component is remarkably stable in amplitude (~±0.15 log units) across the full 35-year span, confirming a consistent hydrological regime.
 - The **remainder** is small relative to the other components (the grey bar comparison confirms this), with a few large negative outliers (~−0.25 to −0.30) likely corresponding to severe drought years.
 - Using `robust = TRUE` down-weights these outlier observations when estimating the trend, preventing them from distorting the decomposition.
+
+
+
+
+To verify the decomposition is adequate, the ACF of the remainder is inspected. Residual autocorrelation would suggest the trend or seasonal windows require adjustment.
+```{r stl-ljung}
+hydro_stl %>%
+  components() %>%
+  pull(remainder) %>%
+  Box.test(lag = 24, type = "Ljung-Box")
+```
+A Ljung-Box test applied to the STL remainder (lag = 24) yields X² = 261.72 (p < 0.001), decisively rejecting white noise. This indicates that systematic variation remains after trend and seasonal extraction, consistent with the influence of inter-annual precipitation variability — motivating the inclusion of precipitation as an exogenous regressor in the ARIMAX specification.  
+
+
+
 
 ---
 
