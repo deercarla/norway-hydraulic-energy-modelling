@@ -849,22 +849,247 @@ glimpse(fill_rate)
 # over the month, not the total. Therefore, we compute the mean – the standard 
 # choice for stock variables aggregated to lower frequency.
 fill_rate_monthly <- fill_rate %>%
-  index_by(year_month = yearmonth(year_week)) %>%
+  index_by(Month = yearmonth(year_week)) %>%
   summarise(
     fill_rate_mean  = mean(fill_rate,  na.rm = TRUE),
     energy_TWh_mean = mean(energy_TWh, na.rm = TRUE),
     capacity_TWh    = first(capacity_TWh) # constant: identical across all weeks
   )
 
-# 2. Join with hydro production on year_month
+# 2. Join with hydro production and create lagged fill-rate variable
 reservoir <- hydro %>%
-  inner_join(inflow_monthly,    by = "year_month") %>%
-  inner_join(fill_rate_monthly, by = "year_month") %>%
-  as_tsibble(index = year_month)
+  inner_join(fill_rate_monthly, by = "Month") %>%
+  arrange(Month) %>%
+  mutate(
+    fill_rate_pct = fill_rate_mean * 100,
+    fill_rate_pct_lag1 = lag(fill_rate_pct, 1)
+  ) %>%
+  filter(!is.na(fill_rate_pct_lag1)) %>%
+  as_tsibble(index = Month)
 
 # Inspect
 glimpse(reservoir)
 ```
+## ARIMAX MODELLING
+
+```{r ARIMAX_MODELLING}
+arimax_train <- reservoir %>%
+  filter(Month <= max(Month) - 24)
+
+arimax_test <- reservoir %>%
+  filter(Month > max(Month) - 24)
+
+fit_arimax <- arimax_train %>%
+  model(
+    ARIMAX_Airline = ARIMA(
+      TWh ~ fill_rate_pct_lag1 +
+        pdq(0, 1, 1) +
+        PDQ(0, 1, 1)
+    ),
+    ARIMAX_Manual = ARIMA(
+      TWh ~ fill_rate_pct_lag1 +
+        pdq(3, 0, 0) +
+        PDQ(1, 1, 0)
+    ),
+    ARIMAX_Auto = ARIMA(
+      TWh ~ fill_rate_pct_lag1
+    )
+  )
+
+glance(fit_arimax)
+```
+
+# Model Insights
+```{r arimax_model_insights, message=FALSE, warning=FALSE}
+# Model Insights: ARIMAX and Final Model Comparison
+# ==============================================================================
+# Purpose
+# This section evaluates whether reservoir fill-rate improves the forecasting model.
+# We first inspect the best ARIMAX specification, then compare it against the
+# univariate benchmark models on the same train-test split.
+# ==============================================================================
+
+
+# ==============================================================================
+# 1. Inspect the selected ARIMAX model
+# ==============================================================================
+
+# The automatically selected ARIMAX model uses lagged reservoir fill-rate as an
+# external regressor and lets R select the ARIMA error structure.
+fit_arimax %>%
+  select(ARIMAX_Auto) %>%
+  report()
+
+
+# Show coefficient estimates for the selected ARIMAX model.
+# The key coefficient is fill_rate_pct_lag1.
+# It measures how monthly hydro generation changes when the previous month's
+# reservoir fill-rate increases by one percentage point.
+arimax_coef <- tidy(fit_arimax) %>%
+  filter(.model == "ARIMAX_Auto")
+
+arimax_coef %>%
+  select(term, estimate, std.error, statistic, p.value) %>%
+  kable(
+    digits = 4,
+    align = "c",
+    caption = "ARIMAX_Auto coefficient estimates"
+  )
+
+
+# ==============================================================================
+# 2. Forecast performance of ARIMAX candidates
+# ==============================================================================
+
+# Generate 24-month forecasts for all ARIMAX candidate models.
+# Since ARIMAX uses an external regressor, we provide arimax_test as new_data.
+fc_arimax <- fit_arimax %>%
+  forecast(new_data = arimax_test)
+
+
+# Compare the three ARIMAX candidates on the test set.
+# Lower RMSE, MAE, MAPE, and MASE indicate better forecast accuracy.
+accuracy(fc_arimax, reservoir) %>%
+  select(.model, RMSE, MAE, MAPE, MASE) %>%
+  arrange(MASE) %>%
+  kable(
+    digits = 3,
+    align = "c",
+    caption = "Forecast accuracy of ARIMAX candidate models"
+  )
+
+
+# ==============================================================================
+# 3. Residual diagnostics for the selected ARIMAX model
+# ==============================================================================
+
+# Visual residual diagnostics:
+# Top: residuals over time
+# Bottom left: residual autocorrelation
+# Bottom right: residual distribution
+fit_arimax %>%
+  select(ARIMAX_Auto) %>%
+  gg_tsresiduals()
+
+
+# Ljung-Box test for remaining residual autocorrelation.
+# The selected ARIMAX_Auto model has ARIMA(1,0,1)(1,1,2)[12] errors,
+# which implies five ARMA parameters: ar1, ma1, sar1, sma1, sma2.
+lb_arimax_auto <- augment(fit_arimax %>% select(ARIMAX_Auto)) %>%
+  features(.innov, ljung_box, lag = 24, dof = 5)
+
+lb_arimax_auto
+
+
+# Robustness check:
+# This version also counts the external regressor as one additional estimated
+# parameter in the degrees of freedom.
+lb_arimax_auto_dof6 <- augment(fit_arimax %>% select(ARIMAX_Auto)) %>%
+  features(.innov, ljung_box, lag = 24, dof = 6)
+
+lb_arimax_auto_dof6
+
+
+# ==============================================================================
+# 4. Refit all benchmark models on the common ARIMAX sample
+# ==============================================================================
+
+# The reservoir fill-rate data start later than the hydro generation series.
+# Therefore, all models are refitted on the same common sample to ensure a fair
+# comparison between univariate models and ARIMAX.
+fit_common <- arimax_train %>%
+  model(
+    Auto_ARIMA = ARIMA(TWh),
+    
+    Manual_SARIMA = ARIMA(
+      TWh ~ pdq(3, 0, 0) + PDQ(1, 1, 0)
+    ),
+    
+    Airline_SARIMA = ARIMA(
+      TWh ~ pdq(0, 1, 1) + PDQ(0, 1, 1)
+    ),
+    
+    ETS = ETS(TWh),
+    
+    ARIMAX_Auto = ARIMA(
+      TWh ~ fill_rate_pct_lag1
+    )
+  )
+
+
+# Information criteria for the common-sample models.
+# AIC, AICc, and BIC are useful for comparing ARIMA-type models.
+# ETS information criteria should be interpreted cautiously because ETS and ARIMA
+# rely on different likelihood structures.
+glance(fit_common) %>%
+  select(.model, sigma2, log_lik, AIC, AICc, BIC) %>%
+  arrange(AICc) %>%
+  kable(
+    digits = 3,
+    align = "c",
+    caption = "Information criteria for models estimated on the common sample"
+  )
+
+
+# ==============================================================================
+# 5. Final out-of-sample forecast comparison
+# ==============================================================================
+
+# Generate 24-month forecasts for all common-sample models.
+# For ARIMAX, arimax_test provides the observed test-period values of the external
+# regressor. Therefore, the ARIMAX forecast is a conditional forecast.
+fc_common <- fit_common %>%
+  forecast(new_data = arimax_test)
+
+
+# Final test-set accuracy comparison.
+# This is the main table for deciding whether ARIMAX improves forecast performance.
+accuracy(fc_common, reservoir) %>%
+  select(.model, RMSE, MAE, MAPE, MASE) %>%
+  arrange(MASE) %>%
+  kable(
+    digits = 3,
+    align = "c",
+    caption = "Forecast accuracy on the common 24-month test set"
+  )
+
+
+# ==============================================================================
+# 6. Forecast plot: best univariate models versus ARIMAX
+# ==============================================================================
+
+# Plot only the most relevant models to avoid visual clutter:
+# ETS, Airline SARIMA, and the selected ARIMAX model.
+fc_common %>%
+  filter(.model %in% c("ETS", "Airline_SARIMA", "ARIMAX_Auto")) %>%
+  autoplot(reservoir, level = 80) +
+  labs(
+    title = "24-Month Forecast Comparison",
+    subtitle = "Best univariate models vs ARIMAX",
+    y = "Hydro power generation (TWh)",
+    x = NULL
+  ) +
+  theme(legend.position = "bottom")
+```
+## ARIMAX Model Insights
+
+To extend the univariate forecasting models, we estimate ARIMAX models using reservoir fill-rate as an external regressor. The reservoir data are provided at weekly frequency and are first aggregated to monthly frequency by taking the average fill-rate within each month. Since the hydro generation series is also monthly, the aggregated reservoir data can then be joined with the hydro production data by month.
+
+The external regressor used in the ARIMAX model is the one-month lagged reservoir fill-rate, expressed in percentage points. This means that hydro generation in month \(t\) is explained using the reservoir fill-rate from month \(t-1\). This avoids using information from the forecast month itself and makes the model more suitable for forecasting.
+
+Three ARIMAX specifications are estimated. The first extends the Airline SARIMA benchmark with the lagged fill-rate. The second extends the manually identified SARIMA specification. The third allows the ARIMA error structure to be selected automatically while keeping the lagged fill-rate as an external regressor.
+
+Among the ARIMAX candidates, the automatically selected ARIMAX model performs best. The selected specification is a linear regression with ARIMA(1,0,1)(1,1,2)[12] errors. The coefficient of the lagged reservoir fill-rate is positive and highly statistically significant. The estimated coefficient is approximately 0.087, meaning that a one percentage point increase in the previous month's reservoir fill-rate is associated with an increase of about 0.087 TWh in monthly hydro power generation, holding the ARIMA error structure constant.
+
+This result is theoretically plausible, since higher reservoir levels indicate greater stored water availability for hydro power production. However, the result should be interpreted as an association rather than a causal effect.
+
+The ARIMAX residual diagnostics show that the residuals are broadly centred around zero, but not perfectly white noise. The Ljung-Box test rejects the null hypothesis of no residual autocorrelation, with a p-value below 0.05. This indicates that some serial dependence remains in the residuals, even after including reservoir fill-rate as an external regressor.
+
+For the final forecast comparison, all benchmark models are refitted on the same common sample, because the reservoir fill-rate data start later than the hydro generation series. This ensures that SARIMA, ETS, and ARIMAX are compared fairly over the same train-test split.
+
+The final out-of-sample accuracy results show that ARIMAX does not outperform the best univariate models. ETS achieves the lowest test-set MASE, followed closely by Airline SARIMA. ARIMAX_Auto ranks third. Although ARIMAX improves the in-sample ARIMA fit and provides a statistically meaningful external regressor, it does not deliver superior 24-month out-of-sample forecast accuracy.
+
+Overall, the ARIMAX extension provides useful explanatory insight: reservoir fill-rate contains relevant information for hydro power generation. However, the best univariate models, especially ETS and Airline SARIMA, already capture most of the predictable seasonal structure in the series. Therefore, ARIMAX adds interpretive value but only limited incremental forecasting value in this setting.
 
 ---
 
