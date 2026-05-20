@@ -789,7 +789,10 @@ The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] mod
 
 ---
 
-# ARIMAX - Reservoir Fill-Rate
+# ARIMAX: Improving forecasting with reservoir fill rate data
+
+## Data Loading: Reservoir Fill-Rate
+
 ```{r load_data_fill_rate}
 # ==============================================================================
 # File 2: Reservoir Fill Rate – Weekly, 1994-2026, TWh
@@ -831,6 +834,39 @@ fill_rate <- raw_fill_rate %>%
 glimpse(fill_rate)
 ```
 
+
+## Reservoir Data — Monthly Aggregation and Join
+
+```{r reservoir_monthly}
+# ==============================================================================
+# Join weekly reservoir data (fill rate) with monthly hydro production
+# Method: aggregate weekly → monthly, then inner-join on year_month
+# ==============================================================================
+
+# 1. Aggregate fill rate to monthly (mean level within each month)
+# Fill rate is a stock variable — it measures a level at a point in time. The 
+# monthly fill rate should represent the average state of the reservoir system 
+# over the month, not the total. Therefore, we compute the mean – the standard 
+# choice for stock variables aggregated to lower frequency.
+fill_rate_monthly <- fill_rate %>%
+  index_by(year_month = yearmonth(year_week)) %>%
+  summarise(
+    fill_rate_mean  = mean(fill_rate,  na.rm = TRUE),
+    energy_TWh_mean = mean(energy_TWh, na.rm = TRUE),
+    capacity_TWh    = first(capacity_TWh) # constant: identical across all weeks
+  )
+
+# 2. Join with hydro production on year_month
+reservoir <- hydro %>%
+  inner_join(inflow_monthly,    by = "year_month") %>%
+  inner_join(fill_rate_monthly, by = "year_month") %>%
+  as_tsibble(index = year_month)
+
+# Inspect
+glimpse(reservoir)
+```
+
+---
 
 # Appendix — Save Processed Data
 
