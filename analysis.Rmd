@@ -789,6 +789,49 @@ The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] mod
 
 ---
 
+# ARIMAX - Reservoir Fill-Rate
+```{r load_data_fill_rate}
+# ==============================================================================
+# File 2: Reservoir Fill Rate – Weekly, 1994-2026, TWh
+# Source: NVE (2026), https://api.nve.no/doc/magasinstatistikk/
+# ==============================================================================
+
+library(jsonlite)
+
+# 1. Download API response
+url_main <- paste0(
+  "https://biapi.nve.no/magasinstatistikk/api/Magasinstatistikk",
+  "/HentOffentligData"
+)
+url_ref  <- paste0(
+  "https://biapi.nve.no/magasinstatistikk/api/Magasinstatistikk",
+  "/HentOffentligDataMinMaxMedian"
+)
+
+raw_fill_rate <- fromJSON(url_main)
+raw_fill_ref  <- fromJSON(url_ref)
+
+# Inspect
+glimpse(raw_fill_rate)
+
+# 2. Filter and transmute relevant data and convert to a tsibble
+fill_rate <- raw_fill_rate %>%
+  filter(omrType == "NO") %>%                # NO = Norway (whole country)
+  transmute(
+    year_week        = yearweek(as.Date(dato_Id)),
+    fill_rate        = fyllingsgrad,
+    energy_TWh       = fylling_TWh,          # stored energy content
+    capacity_TWh     = kapasitet_TWh,        # total system capacity
+    change_prev_week = endring_fyllingsgrad  # weekly delta (kept for reference)
+  ) %>%
+  arrange(year_week) %>%    # sort ascending (raw file is unordered)
+  as_tsibble(index = year_week)
+
+# Inspect
+glimpse(fill_rate)
+```
+
+
 # Appendix — Save Processed Data
 
 ```{r save-data}
