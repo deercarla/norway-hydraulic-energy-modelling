@@ -44,37 +44,62 @@ First, we load the necessary packages and set the working directory.
 # Clear the workspace
 rm(list = ls())
 
-# 1. Define CRAN packages
-cran_packages <- c(
-  "forecast",
-  "fpp3",
-  "jsonlite",
-  "knitr",
+# 1. Install pak if not already available (pak itself is on CRAN)
+if (!requireNamespace("pak", quietly = TRUE)) install.packages("pak")
+
+# ── Data import & wrangling ───────────────────────────────────────────────────
+# readr:    reads CSV files with read_csv()
+# jsonlite: parses JSON responses from the NVE and SSB APIs via fromJSON()
+# stringr:  string manipulation via str_replace() and related functions
+# ── Time series & forecasting ─────────────────────────────────────────────────
+# fpp3:     meta-package for the course — loads tsibble, fable, feasts,
+#           ggplot2, dplyr, and lubridate in one call
+# seasonal: interface to X-13ARIMA-SEATS for seasonal decomposition
+# tseries:  unit root testing via adf.test()
+# urca:     unit root and cointegration tests via ur.kpss() and ur.df()
+# ── Visualisation ─────────────────────────────────────────────────────────────
+# waffle:   waffle chart geometry for the electricity generation mix plot
+#           (not on CRAN — installed from GitHub)
+# ggtext:   renders HTML in ggplot2 text elements for colour-coded annotations
+# patchwork: combines multiple ggplot2 plots into a single figure
+# ── Report generation ─────────────────────────────────────────────────────────
+# knitr:    renders the R Markdown notebook to PDF or HTML
+
+# 2. Define all packages
+# pak accepts CRAN names and "user/repo" GitHub format in the same vector
+packages <- c(
+  # Data import & wrangling
   "readr",
-  "seasonal",
+  "jsonlite",
   "stringr",
+  # Time series & forecasting
+  "fpp3",
+  "seasonal",
   "tseries",
-  "urca"
+  "urca",
+  # Visualisation
+  "hrbrmstr/waffle",  # GitHub — not on CRAN
+  "ggtext",
+  "patchwork",
+  # Report generation
+  "knitr"
 )
 
-# 2. Identify which packages are not yet installed
-new_packages <- cran_packages[!(cran_packages %in% installed.packages()[,"Package"])]
+# 3. Install all missing packages
+# pak skips already-installed packages automatically
+pak::pak(packages)
 
-# 3. Install only the missing ones
-if(length(new_packages)) {
-  install.packages(new_packages, dependencies = TRUE)
-}
+# 4. Load libraries
+# Strip "user/" GitHub prefix — library() only accepts the package name
+library_names <- sub(".*/", "", packages)
+invisible(lapply(library_names, library, character.only = TRUE))
 
-# 4. Load the libraries
-invisible(lapply(cran_packages, library, character.only = TRUE))
-
-# 5. Check if anything failed
-missing <- cran_packages[!(cran_packages %in% installed.packages()[, "Package"])]
-if(length(missing) > 0) {
-  print("The following packages failed to install:")
-  print(missing)
+# 5. Confirm all packages loaded successfully
+missing <- library_names[!library_names %in% loadedNamespaces()]
+if (length(missing) > 0) {
+  message("The following packages failed to load: ", paste(missing, collapse = ", "))
 } else {
-  print("All necessary packages installed and loaded successfully.")
+  message("All packages installed and loaded successfully.")
 }
 ```
 
@@ -262,6 +287,410 @@ hydro <- electricity %>%
 # Inspect
 glimpse(hydro)
 ```
+
+
+# Exploratory Data Analysis
+
+```{r EDA}
+# ══════════════════════════════════════════════════════════════════════════════
+# EXPLORATORY ANALYSIS: hydro_GWh
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 1. autoplot() — full time series ─────────────────────────────────────────
+# What to look for: trend, variance changes, outliers, structural breaks
+hydro %>%
+  autoplot(hydro_GWh) +
+  labs(
+    title   = "Norwegian hydroelectric production — monthly (1993–2026)",
+    y       = "Production (GWh)",
+    x       = NULL,
+    caption = "Source: SSB, table 14091"
+  )
+
+# ── 2. gg_season() — seasonal plot ───────────────────────────────────────────
+# What to look for: consistent seasonal pattern across years, anomalous years
+# Each line = one year. Expect: peak in winter (Jan/Feb), trough in summer
+hydro %>%
+  gg_season(hydro_GWh, labels = "right") +
+  labs(
+    title    = "Seasonal plot: Norwegian hydroelectric production",
+    subtitle = "Each line represents one calendar year",
+    y        = "Production (GWh)",
+    x        = NULL
+  )
+
+# ── 3. gg_subseries() — subseries plot ───────────────────────────────────────
+# What to look for: within-month trend over years, whether seasonality is stable
+# Each panel = one month. Blue horizontal line = mean for that month.
+# Expect: January and February panels to sit higher than June/July
+hydro %>%
+  gg_subseries(hydro_GWh) +
+  labs(
+    title    = "Subseries plot: Norwegian hydroelectric production",
+    subtitle = "Each panel shows one month across all years. Blue line = monthly mean.",
+    y        = "Production (GWh)",
+    x        = NULL
+  )
+
+# ── 4. gg_lag() — lag plots ───────────────────────────────────────────────────
+# What to look for: linear structure at lag 12 confirms annual seasonality;
+# linear structure at lag 1 confirms autocorrelation; scatter = no relationship
+hydro %>%
+  gg_lag(hydro_GWh, lags = 1:12, geom = "point") +
+  labs(
+    title    = "Lag plots: Norwegian hydroelectric production",
+    subtitle = "Strong linear pattern at lag 12 confirms annual seasonality"
+  )
+
+# ── 5. ACF() — autocorrelation function ───────────────────────────────────────
+# What to look for:
+#   - Slow decay → non-stationary (needs differencing)
+#   - Spikes at lag 12, 24 → seasonal autocorrelation
+#   - Sharp cut-off → MA structure
+#   - Gradual decay → AR structure
+hydro %>%
+  ACF(hydro_GWh, lag_max = 48) %>%   # 48 lags = 4 years
+  autoplot() +
+  labs(
+    title    = "ACF: Norwegian hydroelectric production",
+    subtitle = "Dashed lines = 95% significance bounds",
+    x        = "Lag (months)"
+  )
+
+# ── 5b. ACF after first difference — check if differencing induces stationarity
+hydro %>%
+  mutate(d_hydro_GWh = difference(hydro_GWh)) %>%
+  ACF(d_hydro_GWh, lag_max = 48) %>%
+  autoplot() +
+  labs(
+    title    = "ACF: first-differenced hydroelectric production",
+    subtitle = "Residual spikes at lag 12, 24 indicate remaining seasonal structure",
+    x        = "Lag (months)"
+  )
+
+# ── 5c. ACF after seasonal difference — check if seasonal differencing helps
+hydro %>%
+  mutate(ds_hydro_GWh = difference(hydro_GWh, lag = 12)) %>%
+  ACF(ds_hydro_GWh, lag_max = 48) %>%
+  autoplot() +
+  labs(
+    title    = "ACF: seasonally differenced hydroelectric production",
+    subtitle = "Lag = 12 months",
+    x        = "Lag (months)"
+  )
+```
+
+
+# Reservoir Data — Monthly Aggregation and Join
+```{r reservoir_monthly}
+# ==============================================================================
+# Join weekly reservoir data (inflow + fill rate) with monthly hydro production
+# Strategy: aggregate weekly → monthly, then left-join on year_month
+# ==============================================================================
+
+# 1. Aggregate inflow to monthly (sum weekly inflows within each month)
+# Inflow is a flow variable — it measures a quantity accumulating over time.
+# Therefore, we sum the values.
+
+inflow_monthly <- inflow %>%
+  index_by(year_month = yearmonth(year_week)) %>%
+  summarise(
+    inflow_GWh             = sum(useful_inflow_GWh,      na.rm = TRUE),
+    precip_energy_GWh      = sum(precip_energy_GWh,      na.rm = TRUE),
+    runoff_groundwater_GWh = sum(runoff_groundwater_GWh, na.rm = TRUE),
+    snow_GWh               = sum(snow_GWh,               na.rm = TRUE)
+  )
+
+# 2. Aggregate fill rate to monthly (mean level within each month)
+# Fill rate is a stock variable — it measures a level at a point in time. The monthly
+# fill rate should represent the average state of the reservoir system over the month, 
+# not the total. 
+# Therefore, we compute the mean – the standard choice for stock variables aggregated
+# to lower frequency.
+
+fill_rate_monthly <- fill_rate %>%
+  index_by(year_month = yearmonth(year_week)) %>%
+  summarise(
+    fill_rate_mean  = mean(fill_rate,  na.rm = TRUE),
+    energy_GWh_mean = mean(energy_GWh, na.rm = TRUE),
+    capacity_GWh    = first(capacity_GWh) # constant: identical across all weeks
+  )
+
+# 3. Join with hydro production on year_month
+reservoir <- hydro %>%
+  inner_join(inflow_monthly,    by = "year_month") %>%
+  inner_join(fill_rate_monthly, by = "year_month") %>%
+  as_tsibble(index = year_month)
+
+# Inspect
+glimpse(reservoir)
+```
+
+
+# EDA 2
+```{r}
+# ══════════════════════════════════════════════════════════════════════════════
+# WAFFLE CHART: Norway's electricity generation mix — annual, 1993–2025
+# Adapted from R Graph Gallery tutorial (Guillaume Noblet)
+# Source data: electricity tsibble (SSB table 14091)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 1. Prepare data ───────────────────────────────────────────────────────────
+
+# Define sources and colours
+# Norway's mix is almost entirely hydro — colours reflect Norwegian energy identity
+energy_sources <- c(
+  "Hydro"   = "1.1",
+  "Wind"    = "1.2",
+  "Solar"   = "1.3",
+  "Thermal" = "1.4"
+)
+
+energy_colours <- c(
+  "Hydro"   = "#3A7DC9",   # deep blue — water
+  "Wind"    = "#A8D5E2",   # light blue — air
+  "Solar"   = "#F8D564",   # yellow — sun
+  "Thermal" = "#C0856A"    # warm brown — combustion
+)
+
+# Aggregate to annual GWh per source
+# NA treated as 0 (wind and solar not reported in early years = truly zero)
+waffle_data <- electricity %>%
+  as_tibble() %>%
+  filter(
+    category_code %in% energy_sources,
+    lubridate::year(as.Date(year_month)) >= 2009   # start from 2009
+  ) %>%
+  mutate(
+    year   = lubridate::year(as.Date(year_month)),
+    source = names(energy_sources)[match(category_code, energy_sources)],
+    source = factor(source, levels = names(energy_sources))
+  ) %>%
+  group_by(year, source) %>%
+  summarise(
+    annual_GWh = sum(value_GWh, na.rm = TRUE),
+    .groups    = "drop"
+  )
+
+# Compute percentage of each source within each year
+waffle_data <- waffle_data %>%
+  group_by(year) %>%
+  mutate(perc = (annual_GWh / sum(annual_GWh)) * 100) %>%
+  ungroup()
+
+# Round to integers — simple rounding may not sum to exactly 100
+# Apply correction to the largest category (same logic as tutorial)
+waffle_data <- waffle_data %>%
+  group_by(year) %>%
+  mutate(
+    perc_int = as.integer(round(perc)),
+    perc_int = {
+      diff <- 100L - sum(perc_int)
+      if (diff != 0L) perc_int[which.max(annual_GWh)] <-
+        perc_int[which.max(annual_GWh)] + diff
+      perc_int
+    }
+  ) %>%
+  filter(perc_int > 0) %>%    # drop source-years with 0 squares (Solar pre-2010)
+  ungroup()
+
+# ── 2. Build subtitle with colour-coded source labels ────────────────────────
+subtitle_text <- glue::glue(
+  "<span style='color:{energy_colours['Hydro']};'><strong>Hydro</strong></span>
+  has dominated Norwegian electricity generation since records began.
+  <span style='color:{energy_colours['Wind']};'><strong>Wind</strong></span>
+  began entering the mix in the 2000s and has grown steadily,
+  while <span style='color:{energy_colours['Thermal']};'><strong>thermal</strong></span>
+  and <span style='color:{energy_colours['Solar']};'><strong>solar</strong></span>
+  remain marginal. Each square represents 1% of annual generation."
+)
+
+# ── 3. Plot ───────────────────────────────────────────────────────────────────
+# n_rows = 10 → each waffle is 10 × 10 squares (compact, manageable for 33 years)
+# flip = TRUE → squares fill vertically (bottom to top)
+g <- ggplot(waffle_data, aes(fill = source, values = perc_int)) +
+  geom_waffle(
+    colour           = "white",
+    size             = 0.3,
+    n_rows           = 10,
+    flip             = TRUE,
+    make_proportional = FALSE
+  ) +
+  facet_wrap(
+    ~year,
+    nrow           = 1,
+    strip.position = "bottom"
+  ) +
+  scale_x_discrete() +
+  scale_y_continuous(
+    labels = function(x) x * 10,    # each row = 10% (100 squares / 10 rows)
+    expand = c(0, 0)
+  ) +
+  scale_fill_manual(
+    values = energy_colours,
+    breaks = names(energy_sources),
+    name   = "Source",
+    drop   = FALSE
+  ) +
+  theme_minimal(base_family = body_font) +
+  labs(
+    title    = "Norway's Electricity Generation Mix (1993–2025)",
+    subtitle = subtitle_text,
+    caption  = "Each square = 1% of total annual generation. Sources: SSB table 14091."
+  ) +
+  theme(
+    panel.grid      = element_blank(),
+    axis.title      = element_blank(),
+    axis.text.x     = element_blank(),   # year shown in strip label below
+    axis.text.y     = element_blank(),
+    strip.text      = element_text(
+      family = body_font,
+      size   = 7,
+      angle  = 90,                       # rotate year labels — 33 years is tight
+      vjust  = 0.5
+    ),
+    legend.position = "bottom",
+    legend.title    = element_text(family = body_font, size = 10),
+    legend.text     = element_text(family = body_font, size = 10),
+    plot.title      = element_textbox_simple(
+      hjust  = 0,
+      margin = margin(20, 0, 10, 0),
+      size   = 18,
+      family = title_font,
+      face   = "bold",
+      color  = "grey15",
+      width  = unit(0.9, "npc")
+    ),
+    plot.subtitle   = element_textbox_simple(
+      hjust  = 0,
+      margin = margin(10, 0, 30, 0),
+      width  = unit(0.9, "npc"),
+      size   = 12,
+      family = body_font,
+      color  = "grey15"
+    ),
+    plot.caption    = element_textbox_simple(
+      family = body_font,
+      size   = 9,
+      color  = "grey40",
+      hjust  = 0,
+      width  = unit(0.95, "npc"),
+      margin = margin(10, 0, 0, 0)
+    ),
+    plot.background = element_rect(color = "white", fill = "white"),
+    plot.margin     = margin(20, 20, 20, 20)
+  )
+
+g
+
+# ── 4. Save — wide aspect ratio essential for 33 annual columns ───────────────
+ggsave(
+  "waffle_norway_electricity_mix.png",
+  plot   = g,
+  width  = 24,     # wide to accommodate 33 years
+  height = 6,
+  dpi    = 300,
+  bg     = "white"
+)
+```
+
+
+```{r eda 2}
+# ══════════════════════════════════════════════════════════════════════════════
+# STACKED AREA CHART: Norway's electricity generation by source — annual
+# Source data: electricity tsibble (SSB table 14091)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 1. Prepare data ───────────────────────────────────────────────────────────
+area_data <- electricity %>%
+  as_tibble() %>%
+  filter(category_code %in% energy_sources) %>%
+  mutate(
+    year   = lubridate::year(as.Date(year_month)),
+    source = names(energy_sources)[match(category_code, energy_sources)],
+    source = factor(source, levels = rev(names(energy_sources)))
+  ) %>%
+  group_by(year, source) %>%
+  summarise(
+    annual_GWh = sum(value_GWh, na.rm = TRUE),
+    .groups    = "drop"
+  )
+
+# ── 2. Plot A: absolute GWh — shows total volume AND composition ──────────────
+p_absolute <- ggplot(area_data, aes(x = year, y = annual_GWh, fill = source)) +
+  geom_area(colour = "white", linewidth = 0.2, alpha = 0.9) +
+  scale_fill_manual(
+    values = energy_colours,
+    breaks = names(energy_sources),
+    name   = "Source"
+  ) +
+  scale_x_continuous(breaks = seq(1993, 2025, by = 4), expand = c(0, 0)) +
+  scale_y_continuous(
+    labels = scales::comma_format(suffix = " GWh"),
+    expand = c(0, 0)
+  ) +
+  theme_minimal() +
+  labs(
+    title    = "Norwegian Electricity Generation by Source (1993–2025)",
+    subtitle = "Annual production in GWh. Wind and solar are negligible before 2005.",
+    y        = "Annual production (GWh)",
+    x        = NULL,
+    caption  = "Source: SSB table 14091."
+  ) +
+  theme(
+    panel.grid.minor   = element_blank(),
+    panel.grid.major.x = element_blank(),
+    legend.position    = "bottom",
+    plot.background    = element_rect(color = "white", fill = "white"),
+    plot.margin        = margin(20, 20, 20, 20)
+  )
+
+p_absolute
+
+# ── 3. Plot B: 100% stacked — shows composition only ─────────────────────────
+p_percent <- ggplot(area_data, aes(x = year, y = annual_GWh, fill = source)) +
+  geom_area(
+    colour    = "white",
+    linewidth = 0.2,
+    alpha     = 0.9,
+    position  = "fill"
+  ) +
+  scale_fill_manual(
+    values = energy_colours,
+    breaks = names(energy_sources),
+    name   = "Source"
+  ) +
+  scale_x_continuous(breaks = seq(1993, 2025, by = 4), expand = c(0, 0)) +
+  scale_y_continuous(
+    labels = scales::percent_format(),
+    expand = c(0, 0)
+  ) +
+  theme_minimal() +
+  labs(
+    title    = "Share of Norwegian Electricity Generation by Source (1993–2025)",
+    subtitle = "Proportional composition. Hydro dominates; wind share has grown since 2005.",
+    y        = "Share of annual generation (%)",
+    x        = NULL,
+    caption  = "Source: SSB table 14091."
+  ) +
+  theme(
+    panel.grid.minor   = element_blank(),
+    panel.grid.major.x = element_blank(),
+    legend.position    = "bottom",
+    plot.background    = element_rect(color = "white", fill = "white"),
+    plot.margin        = margin(20, 20, 20, 20)
+  )
+
+p_percent
+
+# ── 4. Save ───────────────────────────────────────────────────────────────────
+ggsave("stacked_area_absolute.png", plot = p_absolute,
+       width = 10, height = 6, dpi = 300, bg = "white")
+
+ggsave("stacked_area_percent.png",  plot = p_percent,
+       width = 10, height = 6, dpi = 300, bg = "white")
+```
+
 
 
 # Sanity Checks
