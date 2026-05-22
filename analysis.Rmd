@@ -730,14 +730,16 @@ fc %>%
     "Auto_ARIMA"     = "Auto-ARIMA(3,0,0)(1,1,0)[12]",
     "Manual_SARIMA"  = "Manual SARIMA(3,0,0)(1,1,0)[12]",
     "ETS"            = "ETS(M,A,A)"
-  ))%>%
+  )) %>%
   autoplot(
     hydro %>% filter(Month >= yearmonth("2020 Jan")),
     level = 80
   ) +
   labs(title = "24-Month Forecast: Hydro Power Generation (2020 onwards)",
        y = "TWh", x = NULL) +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") +
+  guides(colour = guide_legend(nrow = 2, byrow = TRUE),
+         fill   = guide_legend(nrow = 2, byrow = TRUE))
 ```
 
 ------------------------------------------------------------------------
