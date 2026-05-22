@@ -780,121 +780,13 @@ The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] mod
 
 # ARIMAX: Improving forecasting with reservoir fill data
 
-## Data Loading: Reservoir Fill
+## ARIMAX Modelling: Fill Rate
 
-```{r load_data_fill_rate}
-# ==============================================================================
-# File 2: Reservoir Fill Rate – Weekly, 1994-2026, TWh
-# Source: NVE (2026), https://api.nve.no/doc/magasinstatistikk/
-# ==============================================================================
-
-library(jsonlite)
-
-# 1. Download API response
-url_main <- paste0(
-  "https://biapi.nve.no/magasinstatistikk/api/Magasinstatistikk",
-  "/HentOffentligData"
-)
-url_ref  <- paste0(
-  "https://biapi.nve.no/magasinstatistikk/api/Magasinstatistikk",
-  "/HentOffentligDataMinMaxMedian"
-)
-
-raw_fill_rate <- fromJSON(url_main)
-raw_fill_ref  <- fromJSON(url_ref)
-
-# Inspect
-glimpse(raw_fill_rate)
-
-# 2. Filter and transmute relevant data and convert to a tsibble
-fill_rate <- raw_fill_rate %>%
-  filter(omrType == "NO") %>%                # NO = Norway (whole country)
-  transmute(
-    year_week        = yearweek(as.Date(dato_Id)),
-    fill_rate        = fyllingsgrad,
-    energy_TWh       = fylling_TWh,          # stored energy content
-    capacity_TWh     = kapasitet_TWh,        # total system capacity
-    change_prev_week = endring_fyllingsgrad  # weekly delta (kept for reference)
-  ) %>%
-  arrange(year_week) %>%    # sort ascending (raw file is unordered)
-  as_tsibble(index = year_week)
-
-# Inspect
-glimpse(fill_rate)
-```
-
-## Reservoir Data — Monthly Aggregation, EDA and Join
-
-```{r reservoir_monthly}
-# ==============================================================================
-# Join weekly reservoir data (fill rate) with monthly hydro production
-# Method: aggregate weekly → monthly, then inner-join on Month
-# ==============================================================================
-
-# Aggregate fill rate to monthly (mean level within each month)
-# Fill rate is a stock variable — it measures a level at a point in time. The 
-# monthly fill rate should represent the average state of the reservoir system 
-# over the month, not the total. Therefore, we compute the mean – the standard 
-# choice for stock variables aggregated to lower frequency.
-fill_rate_monthly <- fill_rate %>%
-  index_by(Month = yearmonth(year_week)) %>%
-  summarise(
-    fill_rate_mean  = mean(fill_rate,  na.rm = TRUE),
-    energy_TWh_mean = mean(energy_TWh, na.rm = TRUE),
-    capacity_TWh    = first(capacity_TWh) # constant: identical across all weeks
-  )
-
-
-fill_rate_monthly %>% has_gaps()
-fill_rate_monthly %>% scan_gaps()
-
-# Visual inspection 
-
-fill_rate_monthly %>%
-  autoplot(fill_rate_mean) +
-  labs(title = "Monthly Reservoir Fill Rate — Norway", y = "Fill Rate", x = NULL)
-
-#stationary test
-
-cat("\n=== ADF Test: Fill Rate ===\n")
-adf.test(fill_rate_monthly$fill_rate_mean)
-
-cat("\n=== KPSS Test: Fill Rate ===\n")
-fill_rate_monthly %>% features(fill_rate_mean, unitroot_kpss)
-
-cat("\n=== Differences needed: Fill Rate ===\n")
-fill_rate_monthly %>% features(fill_rate_mean, unitroot_ndiffs)
-fill_rate_monthly %>% features(fill_rate_mean, unitroot_nsdiffs)
-
-#The monthly reservoir fill rate oscillates between roughly 0.20 and 0.95 throughout the entire sample, tracing a sharp and consistent annual cycle: reservoirs drain over winter as generation meets heating demand, then refill rapidly in spring and early summer as snowmelt and precipitation replenish the system. This pattern repeats stably across all 30 years with no visible long-run trend in the mean level, consistent with the ADF and KPSS tests both confirming stationarity in levels. The amplitude of the cycle does vary across years however — notably shallow troughs appear around 2003 and 2010, corresponding to dry years where reservoirs failed to drain as deeply, while 1996 and 2009 show unusually low winter minima. These year-to-year differences in the depth of the seasonal trough are precisely the variation that makes fill rate a useful exogenous regressor: it captures hydrological conditions that the purely temporal ARIMA structure cannot.
-
-```
-
-```{r seasonal}
-fill_rate_monthly %>%
-  gg_season(fill_rate_mean) +
-  labs(title = "Seasonal Plot: Reservoir Fill Rate", y = "Fill Rate")
-
-#The seasonal plot confirms the regularity of the annual cycle across all years. Reservoirs consistently reach their minimum fill rate between March and April — the end of the winter draw-down period — before refilling rapidly through May and June as snowmelt drives inflow. Peak levels are reached between August and October, after which the cycle restarts. The shape is remarkably uniform across years, with all lines following the same inverted U-path. The main source of year-to-year variation is in the level, not the shape: some years enter winter already well-stocked (lines starting above 0.65 in January) while others, such as the orange line visible at the bottom, begin from a much lower base and never fully recover — likely corresponding to a drought year where the summer refill was insufficient. This level variation, persistent across months within a given year, is what the lagged fill rate regressor captures in the ARIMAX model.
-```
-
-```{r structural break test}
-fill_df <- fill_rate_monthly %>%
-  as_tibble() %>%
-  mutate(Lag1 = lag(fill_rate_mean)) %>%
-  filter(!is.na(Lag1))
-
-qlr_fill <- Fstats(fill_rate_mean ~ Lag1, data = fill_df, from = 0.15)
-sctest(qlr_fill, type = "supF")
-
-plot(qlr_fill,
-     main = "Sup-F Test: Reservoir Fill Rate")
-lines(breakpoints(qlr_fill))
-
-#The F-statistics are essentially noise. P-value = 1 → fail to reject H₀ → no structural break detected
-```
 
 ```{r join of data}
+fill_rate_monthly <- read.csv("data/reservoir_fill_rate.csv")
+fill_rate_monthly <- fill_rate_monthly %>%
+  mutate(Month = yearmonth(Month))
 
 # Join fill rate with hydro production and create lagged fill rate variable
 reservoir_fill_rate <- hydro %>%
@@ -911,7 +803,6 @@ reservoir_fill_rate <- hydro %>%
 glimpse(reservoir_fill_rate)
 ```
 
-## ARIMAX Modelling: Fill Rate
 
 ```{r ARIMAX_fill_rate}
 train_arimax_fill_rate <- reservoir_fill_rate %>%
@@ -922,16 +813,6 @@ test_arimax_fill_rate <- reservoir_fill_rate %>%
 
 fit_arimax_fill_rate <- train_arimax_fill_rate %>%
   model(
-    ARIMAX_Airline = ARIMA(
-      TWh ~ fill_rate_pct_lag1 +
-        pdq(0, 1, 1) +
-        PDQ(0, 1, 1)
-    ),
-    ARIMAX_Manual = ARIMA(
-      TWh ~ fill_rate_pct_lag1 +
-        pdq(3, 0, 0) +
-        PDQ(1, 1, 0)
-    ),
     ARIMAX_Auto = ARIMA(
       TWh ~ fill_rate_pct_lag1
     )
@@ -941,15 +822,9 @@ glance(fit_arimax_fill_rate)
 ```
 
 ## Model Insights: Fill Rate
+This section evaluates whether reservoir fill rate improves the forecasting model.
 
 ```{r arimax_model_insights_fill_rate, message=FALSE, warning=FALSE}
-# ==============================================================================
-# Purpose
-# This section evaluates whether reservoir fill rate improves the forecasting model.
-# We first inspect the best ARIMAX specification, then compare it against the
-# univariate benchmark models on the same train-test split.
-# ==============================================================================
-
 # ==============================================================================
 # 1. Inspect the selected ARIMAX model
 # ==============================================================================
@@ -1009,10 +884,6 @@ lb_arimax_fill_rate_auto_dof6
 
 fit_common_fill_rate <- train_arimax_fill_rate %>%
   model(
-    Auto_ARIMA     = ARIMA(TWh),
-    Manual_SARIMA  = ARIMA(TWh ~ pdq(3, 0, 0) + PDQ(1, 1, 0)),
-    Airline_SARIMA = ARIMA(TWh ~ pdq(0, 1, 1) + PDQ(0, 1, 1)),
-    ETS            = ETS(TWh),
     ARIMAX_Auto    = ARIMA(TWh ~ fill_rate_pct_lag1)
   )
 
@@ -1050,151 +921,12 @@ fc_common_fill_rate %>%
   autoplot(reservoir_fill_rate, level = 80) +
   labs(
     title    = "24-Month Forecast Comparison — Fill Rate Regressor",
-    subtitle = "Best univariate models vs ARIMAX (fill rate)",
+    subtitle = "ARIMAX Auto",
     y        = "Hydro power generation (TWh)",
     x        = NULL
   ) +
   theme(legend.position = "bottom")
 ```
-
-# EXPLANATION
-
-## Paired comparison
-
-------------------------------------------------------------------------
-
-### Pair 1 — ARIMAX candidate model fit (glance)
-
-**Inflow (Image 8) vs Fill Rate (Image 16)**
-
-|           | ARIMAX_Auto AICc | ARIMAX_Airline AICc | ARIMAX_Manual AICc |
-|-----------|------------------|---------------------|--------------------|
-| Inflow    | 834.90           | 862.55              | 929.63             |
-| Fill rate | **739.65**       | **773.60**          | **809.23**         |
-
-Fill rate produces substantially better in-sample fit across all three ARIMAX specifications — a gap of roughly 95 AICc points on the Auto model. This is a large and meaningful difference, not a marginal one. Fill rate is the clearly superior regressor in terms of model fit.
-
-------------------------------------------------------------------------
-
-### Pair 2 — Coefficient estimates (ARIMAX_Auto)
-
-**Inflow (Image 1) vs Fill Rate (Image 15)**
-
-|           | Regressor coefficient | p-value | ARIMA error structure   |
-|-----------|-----------------------|---------|-------------------------|
-| Inflow    | 0.0336                | \<0.001 | ARIMA(1,0,1)(0,1,2)[12] |
-| Fill rate | 0.0872                | \<0.001 | ARIMA(1,0,1)(1,1,2)[12] |
-
-Both regressors are highly significant. The fill rate coefficient is larger in magnitude relative to its scale — a one percentage point increase in last month's fill rate is associated with 0.087 TWh more generation this month. The inflow coefficient of 0.034 means one additional TWh of inflow last month adds 0.034 TWh of generation. Economically both make sense but fill rate's larger t-statistic (10.39 vs 4.69) suggests a stronger signal. Crucially, however, several ARIMA error coefficients in the fill rate model are not significant (ma1, sar1, sma1, sma2), suggesting the automatic order selection may be overfitting the error structure.
-
-------------------------------------------------------------------------
-
-### Pair 3 — ARIMAX candidate out-of-sample accuracy
-
-**Inflow (Image 2) vs Fill Rate (Image 14)**
-
-|           | Best candidate | MASE  | Runner-up      | MASE  |
-|-----------|----------------|-------|----------------|-------|
-| Inflow    | ARIMAX_Airline | 0.468 | ARIMAX_Auto    | 0.584 |
-| Fill rate | ARIMAX_Auto    | 0.500 | ARIMAX_Airline | 0.606 |
-
-For inflow, the Airline specification beats the Auto. For fill rate, the Auto beats the Airline. This is an important reversal — the automatic ARIMA error selection works better when fill rate is the regressor, suggesting the automatic order captures the fill rate dynamics more effectively than the manually imposed Airline structure.
-
-------------------------------------------------------------------------
-
-### Pair 4 — Ljung-Box residual test (dof=5)
-
-**Inflow (Image 3) vs Fill Rate (Image 12)**
-
-|           | lb_stat | lb_pvalue |
-|-----------|---------|-----------|
-| Inflow    | 33.999  | 0.0184    |
-| Fill rate | 32.252  | 0.0205    |
-
-Both models fail the Ljung-Box test at the 5% level, meaning residual autocorrelation remains in both. Neither ARIMAX_Auto has fully white-noise innovations. Fill rate is marginally better (slightly lower statistic) but both are problematic. This is the most important diagnostic concern in your analysis.
-
-------------------------------------------------------------------------
-
-### Pair 5 — Ljung-Box residual test (dof=6)
-
-**Inflow (Image 4) vs Fill Rate (Image 13)**
-
-|           | lb_stat | lb_pvalue |
-|-----------|---------|-----------|
-| Inflow    | 33.999  | 0.0126    |
-| Fill rate | 32.252  | 0.0293    |
-
-Adding one degree of freedom for the external regressor makes the p-values more conservative. Inflow now rejects more strongly (0.013) while fill rate remains marginal but still significant at 5% (0.029). Both remain failures. Worth noting in your report that the correct dof is debated — counting the regressor as an estimated parameter (dof=6) is the more conservative and defensible choice.
-
-------------------------------------------------------------------------
-
-### Pair 6 — Information criteria on common sample
-
-**Inflow (Image 5) vs Fill Rate (Image 11)**
-
-| Model          | Inflow AICc | Fill Rate AICc |
-|----------------|-------------|----------------|
-| ARIMAX_Auto    | 834.90      | **739.65**     |
-| Auto_ARIMA     | 873.15      | 900.11         |
-| Airline_SARIMA | 879.68      | 835.43         |
-| Manual_SARIMA  | 947.45      | 896.84         |
-| ETS            | 2029.97     | 1891.23        |
-
-Two things stand out. First, fill rate ARIMAX_Auto dominates everything in both tables by a wide margin. Second, ETS information criteria are incomparable to ARIMA-type models (different likelihood structures) — the enormous ETS values reflect this, not poor ETS performance. Do not rank ETS based on AIC in your report.
-
-------------------------------------------------------------------------
-
-### Pair 7 — Final 24-month test set accuracy on common sample
-
-**Inflow (Image 6) vs Fill Rate (Image 10)**
-
-| Model          | Inflow MASE | Fill Rate MASE |
-|----------------|-------------|----------------|
-| ETS            | 0.489       | **0.464**      |
-| Airline_SARIMA | **0.483**   | 0.469          |
-| ARIMAX_Auto    | 0.584       | 0.500          |
-| Auto_ARIMA     | 0.587       | 0.759          |
-| Manual_SARIMA  | 0.808       | 0.791          |
-
-This is the most important table in the analysis. Three findings stand out. First, ARIMAX does not beat the best univariate models in either case — Airline_SARIMA edges out everything for inflow, ETS edges out everything for fill rate. Second, ARIMAX with fill rate (MASE=0.500) is much closer to the best univariate model than ARIMAX with inflow (MASE=0.584), confirming fill rate as the more useful regressor. Third, despite better in-sample AICc, ARIMAX underperforms out-of-sample — a classic overfitting signal worth discussing explicitly in your methodology section.
-
-------------------------------------------------------------------------
-
-### Pair 8 — Forecast plots
-
-**Inflow (Image 7) vs Fill Rate (Image 9)**
-
-Both plots tell a similar story visually: the three models (Airline_SARIMA, ETS, ARIMAX_Auto) produce forecasts that are tightly clustered and broadly track the last observed seasonal pattern. The 80% confidence intervals are narrow relative to historical variation, which reflects the strong seasonal regularity of Norwegian hydro production. No model captures the extreme 2022 trough well — visible in both plots as the large dip just before the forecast window — which partly explains why out-of-sample MASE is higher than in-sample fit suggests.
-
-------------------------------------------------------------------------
-
-## Overall takeaway
-
-Fill rate is the better regressor on every in-sample metric by a substantial margin. Out-of-sample, it is also better than inflow as a regressor, though neither ARIMAX beats the best univariate model. The residual autocorrelation failure in both models is the main weakness to address in your report — one honest framing is that the ARIMA error structure has not fully absorbed the remaining dynamics, and that a richer lag structure or a different differencing specification might resolve it. The key result to lead with in your conclusions is that fill rate carries genuine predictive signal (highly significant coefficient, lower AICc) but that the gain in forecast accuracy over a well-specified seasonal ARIMA is modest in this case.
-
-------------------------------------------------------------------------
-
-# ARIMAX Model Insights - Fill rate specific (INCLUDE IN REPORT)
-
-To extend the univariate forecasting models, we estimate ARIMAX models using reservoir fill rate as an external regressor. The reservoir data are provided at weekly frequency and are first aggregated to monthly frequency by taking the average fill rate within each month. Since the hydro generation series is also monthly, the aggregated reservoir data can then be joined with the hydro production data by month.
-
-The external regressor used in the ARIMAX model is the one-month lagged reservoir fill rate, expressed in percentage points. This means that hydro generation in month $t$ is explained using the reservoir fill rate from month $t-1$. This avoids using information from the forecast month itself and makes the model more suitable for forecasting.
-
-Three ARIMAX specifications are estimated. The first extends the Airline SARIMA benchmark with the lagged fill rate. The second extends the manually identified SARIMA specification. The third allows the ARIMA error structure to be selected automatically while keeping the lagged fill rate as an external regressor.
-
-Among the ARIMAX candidates, the automatically selected ARIMAX model performs best. The selected specification is a linear regression with ARIMA(1,0,1)(1,1,2)[12] errors. The coefficient of the lagged reservoir fill rate is positive and highly statistically significant. The estimated coefficient is approximately 0.087, meaning that a one percentage point increase in the previous month's reservoir fill rate is associated with an increase of about 0.087 TWh in monthly hydro power generation, holding the ARIMA error structure constant.
-
-This result is theoretically plausible, since higher reservoir levels indicate greater stored water availability for hydro power production. However, the result should be interpreted as an association rather than a causal effect.
-
-The ARIMAX residual diagnostics show that the residuals are broadly centred around zero, but not perfectly white noise. The Ljung-Box test rejects the null hypothesis of no residual autocorrelation, with a p-value below 0.05. This indicates that some serial dependence remains in the residuals, even after including reservoir fill rate as an external regressor.
-
-For the final forecast comparison, all benchmark models are refitted on the same common sample, because the reservoir fill rate data start later than the hydro generation series. This ensures that SARIMA, ETS, and ARIMAX are compared fairly over the same train-test split.
-
-The final out-of-sample accuracy results show that ARIMAX does not outperform the best univariate models. ETS achieves the lowest test-set MASE, followed closely by Airline SARIMA. ARIMAX_Auto ranks third. Although ARIMAX improves the in-sample ARIMA fit and provides a statistically meaningful external regressor, it does not deliver superior 24-month out-of-sample forecast accuracy.
-
-Overall, the ARIMAX extension provides useful explanatory insight: reservoir fill rate contains relevant information for hydro power generation. However, the best univariate models, especially ETS and Airline SARIMA, already capture most of the predictable seasonal structure in the series. Therefore, ARIMAX adds interpretive value but only limited incremental forecasting value in this setting.
-
-Although fill rate is a statistically significant predictor of hydro generation with a substantially lower AICc than univariate benchmarks, ETS achieves marginally better out-of-sample accuracy with fewer parameters, by tracking the dominant seasonal pattern — suggesting that the incremental predictive content of fill rate, conditional on seasonality, is limited over a 24-month horizon.
 
 ------------------------------------------------------------------------
 
