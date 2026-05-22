@@ -1205,7 +1205,7 @@ The final out-of-sample accuracy results show that ARIMAX does not outperform th
 
 Overall, the ARIMAX extension provides useful explanatory insight: reservoir fill rate contains relevant information for hydro power generation. However, the best univariate models, especially ETS and Airline SARIMA, already capture most of the predictable seasonal structure in the series. Therefore, ARIMAX adds interpretive value but only limited incremental forecasting value in this setting.
 
-*José's conclusion:* Although fill rate is a statistically significant predictor of hydro generation with a substantially lower AICc than univariate benchmarks, ETS achieves marginally better out-of-sample accuracy with fewer parameters, by tracking the dominant seasonal pattern — suggesting that the incremental predictive content of fill rate, conditional on seasonality, is limited over a 24-month horizon.
+Although fill rate is a statistically significant predictor of hydro generation with a substantially lower AICc than univariate benchmarks, ETS achieves marginally better out-of-sample accuracy with fewer parameters, by tracking the dominant seasonal pattern — suggesting that the incremental predictive content of fill rate, conditional on seasonality, is limited over a 24-month horizon.
 
 ------------------------------------------------------------------------
 
