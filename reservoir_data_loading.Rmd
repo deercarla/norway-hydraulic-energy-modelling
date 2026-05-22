@@ -1,0 +1,145 @@
+---
+title: "additional_data"
+author: "carla"
+date: "2026-05-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 5)
+
+library(tidyverse)
+library(tsibble)
+library(fable)
+library(feasts)
+library(tseries)
+library(strucchange)
+library(knitr)
+library(lubridate)
+```
+
+## Data Loading: Reservoir Fill
+
+```{r load_data_fill_rate}
+# ==============================================================================
+# File 2: Reservoir Fill Rate – Weekly, 1994-2026, TWh
+# Source: NVE (2026), https://api.nve.no/doc/magasinstatistikk/
+# ==============================================================================
+
+library(jsonlite)
+
+# 1. Download API response
+url_main <- paste0(
+  "https://biapi.nve.no/magasinstatistikk/api/Magasinstatistikk",
+  "/HentOffentligData"
+)
+url_ref  <- paste0(
+  "https://biapi.nve.no/magasinstatistikk/api/Magasinstatistikk",
+  "/HentOffentligDataMinMaxMedian"
+)
+
+raw_fill_rate <- fromJSON(url_main)
+raw_fill_ref  <- fromJSON(url_ref)
+
+# Inspect
+glimpse(raw_fill_rate)
+
+# 2. Filter and transmute relevant data and convert to a tsibble
+fill_rate <- raw_fill_rate %>%
+  filter(omrType == "NO") %>%                # NO = Norway (whole country)
+  transmute(
+    year_week        = yearweek(as.Date(dato_Id)),
+    fill_rate        = fyllingsgrad,
+    energy_TWh       = fylling_TWh,          # stored energy content
+    capacity_TWh     = kapasitet_TWh,        # total system capacity
+    change_prev_week = endring_fyllingsgrad  # weekly delta (kept for reference)
+  ) %>%
+  arrange(year_week) %>%    # sort ascending (raw file is unordered)
+  as_tsibble(index = year_week)
+
+# Inspect
+glimpse(fill_rate)
+```
+
+## Reservoir Data — Monthly Aggregation, EDA and Join
+
+```{r reservoir_monthly}
+# ==============================================================================
+# Join weekly reservoir data (fill rate) with monthly hydro production
+# Method: aggregate weekly → monthly, then inner-join on Month
+# ==============================================================================
+
+# Aggregate fill rate to monthly (mean level within each month)
+# Fill rate is a stock variable — it measures a level at a point in time. The 
+# monthly fill rate should represent the average state of the reservoir system 
+# over the month, not the total. Therefore, we compute the mean – the standard 
+# choice for stock variables aggregated to lower frequency.
+fill_rate_monthly <- fill_rate %>%
+  index_by(Month = yearmonth(year_week)) %>%
+  summarise(
+    fill_rate_mean  = mean(fill_rate,  na.rm = TRUE),
+    energy_TWh_mean = mean(energy_TWh, na.rm = TRUE),
+    capacity_TWh    = first(capacity_TWh) # constant: identical across all weeks
+  )
+
+
+fill_rate_monthly %>% has_gaps()
+fill_rate_monthly %>% scan_gaps()
+
+# Visual inspection 
+
+fill_rate_monthly %>%
+  autoplot(fill_rate_mean) +
+  labs(title = "Monthly Reservoir Fill Rate — Norway", y = "Fill Rate", x = NULL)
+
+#stationary test
+
+cat("\n=== ADF Test: Fill Rate ===\n")
+adf.test(fill_rate_monthly$fill_rate_mean)
+
+cat("\n=== KPSS Test: Fill Rate ===\n")
+fill_rate_monthly %>% features(fill_rate_mean, unitroot_kpss)
+
+cat("\n=== Differences needed: Fill Rate ===\n")
+fill_rate_monthly %>% features(fill_rate_mean, unitroot_ndiffs)
+fill_rate_monthly %>% features(fill_rate_mean, unitroot_nsdiffs)
+```
+
+
+The monthly reservoir fill rate oscillates between roughly 0.20 and 0.95 throughout the entire sample, tracing a sharp and consistent annual cycle: reservoirs drain over winter as generation meets heating demand, then refill rapidly in spring and early summer as snowmelt and precipitation replenish the system. This pattern repeats stably across all 30 years with no visible long-run trend in the mean level, consistent with the ADF and KPSS tests both confirming stationarity in levels. The amplitude of the cycle does vary across years however — notably shallow troughs appear around 2003 and 2010, corresponding to dry years where reservoirs failed to drain as deeply, while 1996 and 2009 show unusually low winter minima. These year-to-year differences in the depth of the seasonal trough are precisely the variation that makes fill rate a useful exogenous regressor: it captures hydrological conditions that the purely temporal ARIMA structure cannot.
+
+```{r seasonal}
+fill_rate_monthly %>%
+  gg_season(fill_rate_mean) +
+  labs(title = "Seasonal Plot: Reservoir Fill Rate", y = "Fill Rate")
+```
+
+The seasonal plot confirms the regularity of the annual cycle across all years. Reservoirs consistently reach their minimum fill rate between March and April — the end of the winter draw-down period — before refilling rapidly through May and June as snowmelt drives inflow. Peak levels are reached between August and October, after which the cycle restarts. The shape is remarkably uniform across years, with all lines following the same inverted U-path. The main source of year-to-year variation is in the level, not the shape: some years enter winter already well-stocked (lines starting above 0.65 in January) while others, such as the orange line visible at the bottom, begin from a much lower base and never fully recover — likely corresponding to a drought year where the summer refill was insufficient. This level variation, persistent across months within a given year, is what the lagged fill rate regressor captures in the ARIMAX model.
+
+```{r structural break test}
+fill_df <- fill_rate_monthly %>%
+  as_tibble() %>%
+  mutate(Lag1 = lag(fill_rate_mean)) %>%
+  filter(!is.na(Lag1))
+
+qlr_fill <- Fstats(fill_rate_mean ~ Lag1, data = fill_df, from = 0.15)
+sctest(qlr_fill, type = "supF")
+
+plot(qlr_fill,
+     main = "Sup-F Test: Reservoir Fill Rate")
+lines(breakpoints(qlr_fill))
+```
+The F-statistics are essentially noise. P-value = 1 → fail to reject H₀ → no structural break detected
+
+
+
+# Save data
+```{r save}
+write.csv(
+  fill_rate_monthly,
+  "data/reservoir_fill_rate.csv",
+  row.names = FALSE
+)
+```
+
