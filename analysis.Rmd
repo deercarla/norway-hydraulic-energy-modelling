@@ -778,7 +778,112 @@ The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] mod
 
 ------------------------------------------------------------------------
 
-# ARIMAX: Improving forecasting with reservoir fill data
+
+## CCF
+```{r CCF}
+ccf_data <- reservoir_fill_rate %>%
+  as_tibble() %>%
+  filter(!is.na(fill_rate_pct), !is.na(TWh))
+
+ccf(ccf_data$fill_rate_pct, ccf_data$TWh,
+    lag.max = 12,
+    main = "CCF: Reservoir Fill Rate vs Hydro Generation")
+```
+
+
+```{r}
+# Create seasonally differenced series for CCF
+ccf_diff_data <- reservoir_fill_rate %>%
+  as_tibble() %>%
+  mutate(
+    TWh_sdiff       = difference(TWh,           lag = 12),
+    fill_rate_sdiff = difference(fill_rate_pct, lag = 12)
+  ) %>%
+  filter(!is.na(TWh_sdiff), !is.na(fill_rate_sdiff))
+
+# CCF on differenced series
+ccf(ccf_diff_data$fill_rate_sdiff, ccf_diff_data$TWh_sdiff,
+    lag.max = 12,
+    main = "CCF: Fill Rate vs Hydro Generation (seasonally differenced)")
+
+# Confirm stationarity after differencing
+cat("=== ADF: Hydro (seasonally differenced) ===\n")
+adf.test(granger_data$TWh_sdiff)
+
+cat("\n=== ADF: Fill Rate (seasonally differenced) ===\n")
+adf.test(granger_data$fill_rate_sdiff)
+```
+The CCF on the seasonally differenced series reveals a strong positive cross-correlation at lag 0 (~0.70) and lag 1 (~0.65), both well above the significance bounds. This confirms two things: fill rate and hydro generation move together contemporaneously, and last month's fill rate remains a strong predictor of current generation even after accounting for seasonality. The lag-1 specification used in the ARIMAX model is therefore empirically justified — it captures the most informative predictive signal available from the regressor while avoiding simultaneity between the dependent variable and the regressor at the same time period.
+
+Both series reject non-stationarity strongly (p = 0.01, the minimum reportable value). This confirms that seasonal differencing was sufficient to achieve stationarity in both hydro generation and fill rate.
+
+## Correlation test
+
+```{r correlation}
+cat("=== Pearson Correlation: Fill Rate (lag 1) vs Hydro ===\n")
+cor.test(reservoir_fill_rate$fill_rate_pct_lag1,
+         reservoir_fill_rate$TWh,
+         method = "pearson")
+```
+r = 0.447 → moderate positive linear correlation between last month's fill rate and this month's hydro generation.
+
+## Granger
+```{r granger}
+
+library(lmtest)
+
+# Granger test: does fill rate help predict hydro?
+cat("\n=== Granger Test: Fill Rate → Hydro ===\n")
+grangertest(TWh_sdiff ~ fill_rate_sdiff,
+            order = 1,
+            data  = granger_data)
+
+# Granger test: does hydro help predict fill rate? (reverse direction)
+cat("\n=== Granger Test: Hydro → Fill Rate ===\n")
+grangertest(fill_rate_sdiff ~ TWh_sdiff,
+            order = 1,
+            data  = granger_data)
+```
+The Granger causality test reveals a strongly significant effect of fill rate on hydro generation (F = 86.27, p < 0.001), confirming that last month's reservoir fill rate provides substantial predictive information for current generation beyond the series' own history. The reverse direction is also significant but considerably weaker (F = 5.50, p = 0.020), indicating a bidirectional relationship: while generation levels feed back into reservoir state, the dominant predictive channel runs from fill rate to generation. 
+
+##VAR
+```{r VAR}
+library(vars)
+
+# Prepare matrix of stationary series
+var_data <- granger_data %>%
+  dplyr::select(TWh_sdiff, fill_rate_sdiff) %>%
+  as.data.frame()
+
+# Select optimal lag order
+var_lag <- VARselect(var_data, lag.max = 12, type = "const")
+cat("\n=== VAR Lag Selection ===\n")
+print(var_lag$selection)
+
+# Estimate VAR with optimal lag (AIC)
+var_model <- VAR(var_data,
+                 p    = var_lag$selection["AIC(n)"],
+                 type = "const")
+
+summary(var_model)
+
+# Impulse response: effect of fill rate shock on hydro
+irf_result <- irf(var_model,
+                  impulse  = "fill_rate_sdiff",
+                  response = "TWh_sdiff",
+                  n.ahead  = 12,
+                  boot     = TRUE)
+plot(irf_result,
+     main = "Impulse Response: Fill Rate Shock → Hydro Generation")
+
+# Forecast error variance decomposition
+fevd_result <- fevd(var_model, n.ahead = 12)
+plot(fevd_result)
+```
+
+
+
+# Improving forecasting with reservoir fill data
 
 ## ARIMAX Modelling: Fill Rate
 
