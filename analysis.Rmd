@@ -23,6 +23,8 @@ library(tseries)
 library(strucchange)
 library(knitr)
 library(lubridate)
+library(vars)
+library(lmtest)
 ```
 
 ------------------------------------------------------------------------
@@ -779,6 +781,97 @@ The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] mod
 ------------------------------------------------------------------------
 
 
+
+
+
+# Improving forecasting with reservoir fill data
+
+## ARIMAX Modelling: Fill Rate
+
+
+```{r Load data}
+fill_rate_monthly <- read.csv("data/reservoir_fill_rate.csv")
+fill_rate_monthly <- fill_rate_monthly %>%
+  mutate(Month = yearmonth(Month)) %>%
+  as_tsibble(index = Month)
+```
+
+```{r EDA}
+fill_rate_monthly %>%
+  autoplot(fill_rate_mean) +
+  labs(title = "Monthly Reservoir Fill Rate — Norway",
+       y = "Fill Rate", x = NULL)
+```
+
+##seasonality check
+```{r seasonal plots}
+fill_rate_monthly %>%
+  gg_season(fill_rate_mean, labels = "both") +
+  labs(title = "Seasonal Plot: Reservoir Fill Rate",
+       y = "Fill Rate")
+
+fill_rate_monthly %>%
+  gg_subseries(fill_rate_mean) +
+  labs(title = "Subseries Plot: Reservoir Fill Rate",
+       y = "Fill Rate") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+The seasonal and subseries plots confirm the strong and stable annual cycle in Norwegian reservoir fill rates. As shown in the seasonal plot, reservoirs follow a consistent S-shaped pattern each year: draining through winter to a trough in March–April (typically 0.20–0.35), refilling rapidly through May–July driven by snowmelt, and reaching peak levels of 0.75–0.95 between August and October before the draw-down restarts. This shape is remarkably uniform across all 30 years — year-to-year variation manifests in the level rather than the shape, with dry years such as 2002 and 2010 visibly below the rest and wet years like 2020 reaching the highest recorded peaks. The subseries plot reinforces this: the blue monthly means are stable over time with no directional drift, consistent with the stationarity confirmed by the ADF and KPSS tests. Winter months (January–April) show considerably wider spread around their means than summer months, reflecting the greater sensitivity of low-reservoir conditions to year-specific hydrological variability
+
+#Stationary test
+```{r stationary test}
+cat("=== ADF Test: Fill Rate ===\n")
+adf.test(fill_rate_monthly$fill_rate_mean)
+
+cat("\n=== KPSS Test: Fill Rate ===\n")
+fill_rate_monthly %>% features(fill_rate_mean, unitroot_kpss)
+
+cat("\n=== Differences needed: Fill Rate ===\n")
+fill_rate_monthly %>% features(fill_rate_mean, unitroot_ndiffs)
+fill_rate_monthly %>% features(fill_rate_mean, unitroot_nsdiffs)
+```
+The ADF test strongly rejects the null of a unit root (Dickey-Fuller = −6.01, p = 0.01) and the KPSS test fails to reject stationarity (stat = 0.026, p = 0.10) — both tests agree, confirming the series is stationary in levels. This stands in contrast to the hydro generation series in section 5, where ADF and KPSS conflicted due to the strong seasonal pattern. No regular differencing is required (ndiffs = 0), though one seasonal difference is indicated (nsdiffs = 1), reflecting the pronounced annual cycle visible in the seasonal plots.
+
+## structural break testing
+```{r}
+fill_df <- fill_rate_monthly %>%
+  as_tibble() %>%
+  mutate(Lag1 = lag(fill_rate_mean)) %>%
+  filter(!is.na(Lag1))
+
+qlr_fill <- Fstats(fill_rate_mean ~ Lag1,
+                   data = fill_df,
+                   from = 0.15)
+
+cat("\n=== Sup-F Test: Reservoir Fill Rate ===\n")
+sctest(qlr_fill, type = "supF")
+
+plot(qlr_fill, main = "Sup-F Test: Reservoir Fill Rate")
+lines(breakpoints(qlr_fill))
+```
+The Sup-F (QLR) test finds no evidence of a structural break in the reservoir fill rate series (sup.F = 1.01, p = 1.00). As visible in the plot, the F-statistics computed at every candidate breakpoint across the full sample remain essentially flat and close to zero throughout, never approaching the 5% critical value shown by the red horizontal line (~11.7). The maximum F-statistic of just 1.01 — with a p-value of 1 — means the null hypothesis of parameter stability cannot be rejected at any conventional significance level. The fill rate series has therefore maintained stable statistical properties across the entire 30-year sample, with no policy change, drought cycle, or climate shift producing a detectable permanent shift in its dynamics.
+
+
+```{r join data}
+# Join fill rate with hydro production and create lagged fill rate variable
+reservoir_fill_rate <- hydro %>%
+  inner_join(fill_rate_monthly, by = "Month") %>%
+  arrange(Month) %>%
+  mutate(
+    fill_rate_pct = fill_rate_mean * 100,
+    fill_rate_pct_lag1 = lag(fill_rate_pct, 1)
+  ) %>%
+  filter(!is.na(fill_rate_pct_lag1)) %>%
+  as_tsibble(index = Month)
+
+# Inspect
+glimpse(reservoir_fill_rate)
+```
+```{r gap checking}
+reservoir_fill_rate %>% has_gaps()
+reservoir_fill_rate %>% scan_gaps()
+```
+
 ## CCF
 ```{r CCF}
 ccf_data <- reservoir_fill_rate %>%
@@ -791,7 +884,7 @@ ccf(ccf_data$fill_rate_pct, ccf_data$TWh,
 ```
 
 
-```{r}
+```{r seasonal dif CCF}
 # Create seasonally differenced series for CCF
 ccf_diff_data <- reservoir_fill_rate %>%
   as_tibble() %>%
@@ -829,9 +922,6 @@ r = 0.447 → moderate positive linear correlation between last month's fill rat
 
 ## Granger
 ```{r granger}
-
-library(lmtest)
-
 # Granger test: does fill rate help predict hydro?
 cat("\n=== Granger Test: Fill Rate → Hydro ===\n")
 grangertest(TWh_sdiff ~ fill_rate_sdiff,
@@ -848,67 +938,61 @@ The Granger causality test reveals a strongly significant effect of fill rate on
 
 ##VAR
 ```{r VAR}
-library(vars)
 
-# Prepare matrix of stationary series
-var_data <- granger_data %>%
-  dplyr::select(TWh_sdiff, fill_rate_sdiff) %>%
-  as.data.frame()
-
-# Select optimal lag order
-var_lag <- VARselect(var_data, lag.max = 12, type = "const")
-cat("\n=== VAR Lag Selection ===\n")
-print(var_lag$selection)
-
-# Estimate VAR with optimal lag (AIC)
-var_model <- VAR(var_data,
-                 p    = var_lag$selection["AIC(n)"],
-                 type = "const")
-
-summary(var_model)
-
-# Impulse response: effect of fill rate shock on hydro
-irf_result <- irf(var_model,
-                  impulse  = "fill_rate_sdiff",
-                  response = "TWh_sdiff",
-                  n.ahead  = 12,
-                  boot     = TRUE)
-plot(irf_result,
-     main = "Impulse Response: Fill Rate Shock → Hydro Generation")
-
-# Forecast error variance decomposition
-fevd_result <- fevd(var_model, n.ahead = 12)
-plot(fevd_result)
-```
-
-
-
-# Improving forecasting with reservoir fill data
-
-## ARIMAX Modelling: Fill Rate
-
-
-```{r join of data}
-fill_rate_monthly <- read.csv("data/reservoir_fill_rate.csv")
-fill_rate_monthly <- fill_rate_monthly %>%
-  mutate(Month = yearmonth(Month))
-
-# Join fill rate with hydro production and create lagged fill rate variable
-reservoir_fill_rate <- hydro %>%
-  inner_join(fill_rate_monthly, by = "Month") %>%
-  arrange(Month) %>%
+# Use the seasonally differenced series already created
+var_tsibble <- reservoir_fill_rate %>%
   mutate(
-    fill_rate_pct = fill_rate_mean * 100,
-    fill_rate_pct_lag1 = lag(fill_rate_pct, 1)
+    TWh_sdiff       = difference(TWh,           lag = 12),
+    fill_rate_sdiff = difference(fill_rate_pct, lag = 12)
   ) %>%
-  filter(!is.na(fill_rate_pct_lag1)) %>%
-  as_tsibble(index = Month)
+  filter(!is.na(TWh_sdiff), !is.na(fill_rate_sdiff))
+fit_var <- var_tsibble %>%
+  model(
+    aicc = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff)),
+    bic  = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff), ic = "bic")
+  )
 
-# Inspect
-glimpse(reservoir_fill_rate)
+# Check which lag orders were selected
+fit_var
+```
+AICC --> Prefers richer model, better for forecasting
+BIC --> Penalises complexity more, prefers parsimony
+
+```{r plot series}
+var_tsibble %>%
+  pivot_longer(c(TWh_sdiff, fill_rate_sdiff),
+               names_to  = "variable",
+               values_to = "value") %>%
+  ggplot(aes(x = Month, y = value)) +
+  geom_line() +
+  facet_grid(vars(variable), scales = "free_y") +
+  labs(title = "Hydro Generation and Fill Rate (seasonally differenced)",
+       y     = "Differenced value",
+       x     = NULL) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+```{r fit var}
+fit_var <- var_tsibble %>%
+  model(
+    aicc = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff)),
+    bic  = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff), ic = "bic")
+  )
+
+# Check which lag orders were selected
+fit_varfit_var <- var_tsibble %>%
+  model(
+    aicc = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff)),
+    bic  = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff), ic = "bic")
+  )
+
+# Check which lag orders were selected
+fit_var
 ```
 
 
+
+
+## ARIMAX
 ```{r ARIMAX_fill_rate}
 train_arimax_fill_rate <- reservoir_fill_rate %>%
   filter(Month <= max(Month) - 24)
