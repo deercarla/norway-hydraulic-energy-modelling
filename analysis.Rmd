@@ -710,15 +710,27 @@ fc <- fit_train %>%
 
 ```{r forecast-plot}
 fc %>%
+  mutate(.model = recode(.model,
+    "Airline_SARIMA" = "Airline SARIMA(0,1,1)(0,1,1)[12]",
+    "Auto_ARIMA"     = "Auto-ARIMA(3,0,0)(1,1,0)[12]",
+    "Manual_SARIMA"  = "Manual SARIMA(3,0,0)(1,1,0)[12]",
+    "ETS"            = "ETS(M,A,A)"
+  )) %>%
   autoplot(hydro, level = 80) +
   labs(title = "24-Month Forecast: Hydro Power Generation — All Models",
-       y = "TWh", x = NULL) +
+       y = "TWh", x = "Month") +
   theme(legend.position = "bottom") +
   facet_wrap(~ .model, ncol = 2)
 ```
 
 ```{r forecast-combined-plot}
 fc %>%
+  mutate(.model = recode(.model,
+    "Airline_SARIMA" = "Airline SARIMA(0,1,1)(0,1,1)[12]",
+    "Auto_ARIMA"     = "Auto-ARIMA(3,0,0)(1,1,0)[12]",
+    "Manual_SARIMA"  = "Manual SARIMA(3,0,0)(1,1,0)[12]",
+    "ETS"            = "ETS(M,A,A)"
+  ))%>%
   autoplot(
     hydro %>% filter(Month >= yearmonth("2020 Jan")),
     level = 80
