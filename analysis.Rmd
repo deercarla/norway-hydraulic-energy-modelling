@@ -574,14 +574,7 @@ We estimate four competing models:
 4.  **ETS(M,A,A)** — exponential smoothing with multiplicative errors, additive trend, and additive seasonality. Smoothing parameters: α = 0.906 (very high, weighting recent observations heavily), β ≈ 0 (near-constant trend), γ ≈ 0 (near-fixed seasonal pattern). These near-zero β and γ values confirm the visual finding from the subseries plots: the trend and seasonal shape are stable over time.
 
 ```{r estimation}
-# --- 1. Auto-ARIMA ---
-fit_arima_auto <- hydro %>%
-  model(ARIMA(TWh))
-
-cat("=== Auto-ARIMA ===\n")
-report(fit_arima_auto)
-
-# --- 2. Manual SARIMA(3,0,0)(1,1,0)[12] ---
+# --- 1. Manual SARIMA(3,0,0)(1,1,0)[12] ---
 # Justification:
 #   p=3: PACF of seasonally differenced series shows significant spikes at lags
 #        1, 2, 3 and cuts off sharply — hallmark of AR(3).
@@ -600,7 +593,7 @@ fit_arima_manual <- hydro %>%
 cat("\n=== Manual SARIMA(3,0,0)(1,1,0)[12] ===\n")
 report(fit_arima_manual)
 
-# --- 3. Airline SARIMA(0,1,1)(0,1,1)[12] ---
+# --- 2. Airline SARIMA(0,1,1)(0,1,1)[12] ---
 # The classic airline model (Box & Jenkins, 1976). Both a regular and seasonal
 # difference are applied (d=1, D=1), with MA(1) at the non-seasonal and seasonal
 # levels. Appropriate when both the local level and the seasonal pattern are
@@ -611,26 +604,19 @@ fit_sarima_airline <- hydro %>%
 cat("\n=== Airline SARIMA(0,1,1)(0,1,1)[12] ===\n")
 report(fit_sarima_airline)
 
-# --- 4. ETS ---
+# --- 3. ETS ---
 fit_ets <- hydro %>%
   model(ETS(TWh))
 
 cat("\n=== ETS ===\n")
 report(fit_ets)
 
-# --- 5. Auto-ARIMA on log scale (included for reference) ---
-fit_arima_log <- hydro %>%
-  model(ARIMA(log_TWh))
-
-cat("\n=== Auto-ARIMA (log scale) ===\n")
-report(fit_arima_log)
 ```
 
 **Model comparison — information criteria on the full sample (AICc, lower is better):**
 
 ```{r ic-comparison}
 bind_rows(
-  glance(fit_arima_auto)     %>% mutate(Model = "Auto-ARIMA"),
   glance(fit_arima_manual)   %>% mutate(Model = "Manual SARIMA 300-110-12"),
   glance(fit_sarima_airline) %>% mutate(Model = "Airline SARIMA 011-011-12"),
   glance(fit_ets)            %>% mutate(Model = "ETS MAA")
@@ -658,14 +644,6 @@ Note: ETS AICc cannot be directly compared to ARIMA AICc as they use different l
 # Diagnostic Checks
 
 ```{r diagnostics}
-fit_arima_auto %>%
-  gg_tsresiduals() +
-  labs(title = "Residual Diagnostics: Auto-ARIMA")
-
-augment(fit_arima_auto) %>%
-  features(.innov, ljung_box, lag = 24, dof = 4) %>%
-  kable(digits = 4, caption = "Ljung-Box Test: Auto-ARIMA (lag=24)")
-
 fit_arima_manual %>%
   gg_tsresiduals() +
   labs(title = "Residual Diagnostics: Manual SARIMA(3,0,0)(1,1,0)[12]")
@@ -695,7 +673,6 @@ augment(fit_ets) %>%
 
 | Model | lb_stat | p-value | Verdict |
 |----|----|----|----|
-| Auto-ARIMA(3,0,0)(1,1,0)[12] | 76.37 | \< 0.001 | **FAIL** — significant residual autocorrelation remains |
 | Manual SARIMA(3,0,0)(1,1,0)[12] | 76.37 | \< 0.001 | **FAIL** — identical to auto-ARIMA |
 | Airline SARIMA(0,1,1)(0,1,1)[12] | 46.35 | 0.0018 | **FAIL** — still significant, but notably lower statistic |
 | ETS(M,A,A) | 40.29 | 0.0199 | **FAIL** — marginally significant |
@@ -721,7 +698,6 @@ cat("Test set:     from", as.character(min(test$Month)),
 # Fit all models on training data
 fit_train <- train %>%
   model(
-    Auto_ARIMA      = ARIMA(TWh),
     Manual_SARIMA   = ARIMA(TWh ~ pdq(3, 0, 0) + PDQ(1, 1, 0)),
     Airline_SARIMA  = ARIMA(TWh ~ pdq(0, 1, 1) + PDQ(0, 1, 1)),
     ETS             = ETS(TWh)
@@ -770,7 +746,6 @@ accuracy(fc, hydro) %>%
 |--------------------------------------|-----------|-----------|-----------|-----------|
 | **Airline SARIMA(0,1,1)(0,1,1)[12]** | **0.618** | **0.838** | **5.107** | **0.474** |
 | ETS(M,A,A)                           | 0.650     | 0.911     | 5.585     | 0.499     |
-| Auto-ARIMA(3,0,0)(1,1,0)[12]         | 0.990     | 1.233     | 8.044     | 0.759     |
 | Manual SARIMA(3,0,0)(1,1,0)[12]      | 1.037     | 1.275     | 8.399     | 0.796     |
 
 **Why did the Airline model win?**
