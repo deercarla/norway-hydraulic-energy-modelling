@@ -314,9 +314,14 @@ A Ljung-Box test applied to the STL remainder (lag = 24) yields X² = 261.72 (p 
 adf_hydro  <- adf.test(hydro$TWh)
 adf_total  <- adf.test(total_elec$TWh)
 
+
 cat("=== ADF Test (levels) ===\n")
-cat("Hydro:  p-value =", round(adf_hydro$p.value,  4), "\n")
-cat("Total:  p-value =", round(adf_total$p.value, 4), "\n")
+cat("Hydro:  Dickey-Fuller =", round(adf_hydro$statistic, 4),
+    " | Lag order =", adf_hydro$parameter,
+    " | p-value =", round(adf_hydro$p.value, 4), "\n")
+cat("Total:  Dickey-Fuller =", round(adf_total$statistic, 4),
+    " | Lag order =", adf_total$parameter,
+    " | p-value =", round(adf_total$p.value, 4), "\n")
 
 # KPSS: H0 = stationary; p < 0.05 → non-stationary
 kpss_hydro <- hydro       %>% features(TWh, unitroot_kpss)
