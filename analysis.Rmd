@@ -25,7 +25,7 @@ library(knitr)
 library(lubridate)
 ```
 
----
+------------------------------------------------------------------------
 
 # Load and Prepare the Data
 
@@ -91,7 +91,7 @@ has_gaps(total_elec)
 scan_gaps(total_elec)
 ```
 
----
+------------------------------------------------------------------------
 
 # Preliminary Visual Analysis
 
@@ -101,13 +101,13 @@ scan_gaps(total_elec)
 total_elec %>%
   autoplot(TWh) +
   labs(title    = "Total Electricity Generation in Norway",
-       subtitle = "May 1993 – March 2026",
+       subtitle = "Jan 1993 – March 2026",
        y = "TWh", x = NULL)
 
 hydro %>%
   autoplot(TWh) +
   labs(title    = "Hydro Power Generation in Norway",
-       subtitle = "May 1993 – March 2026",
+       subtitle = "Jan 1993 – March 2026",
        y = "TWh", x = NULL)
 
 long %>%
@@ -122,7 +122,7 @@ long %>%
 **What do we see?**
 
 - Strong seasonal pattern in both series (high in winter, low in summer).
-- Hydro tracks Total very closely, confirming hydro dominates Norwegian electricity generation (~90–95%).
+- Hydro tracks Total very closely, confirming hydro dominates Norwegian electricity generation (\~90–95%).
 - No strong long-run trend; production fluctuates around a relatively stable level with some multi-year cycles.
 
 ## Hydro as a Share of Total Generation
@@ -209,7 +209,7 @@ hydro %>%
        y = "TWh", x = NULL)
 ```
 
----
+------------------------------------------------------------------------
 
 # Transformation
 
@@ -243,7 +243,7 @@ hydro %>%
 
 The log scale stabilises the variance slightly and will be used for the STL decomposition and model estimation.
 
----
+------------------------------------------------------------------------
 
 # Decomposition
 
@@ -279,31 +279,25 @@ hydro_stl %>%
        subtitle = "log_TWh = trend + season_year + remainder")
 ```
 
-
-
 **Interpretation:**
 
 - The **trend** is non-linear and non-monotonic — rising toward 2010, dipping, then recovering — reflecting capacity changes and hydrological cycles.
-- The **seasonal** component is remarkably stable in amplitude (~±0.15 log units) across the full 35-year span, confirming a consistent hydrological regime.
-- The **remainder** is small relative to the other components (the grey bar comparison confirms this), with a few large negative outliers (~−0.25 to −0.30) likely corresponding to severe drought years.
+- The **seasonal** component is remarkably stable in amplitude (\~±0.15 log units) across the full 35-year span, confirming a consistent hydrological regime.
+- The **remainder** is small relative to the other components (the grey bar comparison confirms this), with a few large negative outliers (\~−0.25 to −0.30) likely corresponding to severe drought years.
 - Using `robust = TRUE` down-weights these outlier observations when estimating the trend, preventing them from distorting the decomposition.
 
-
-
-
 To verify the decomposition is adequate, the ACF of the remainder is inspected. Residual autocorrelation would suggest the trend or seasonal windows require adjustment.
+
 ```{r stl-ljung}
 hydro_stl %>%
   components() %>%
   pull(remainder) %>%
   Box.test(lag = 24, type = "Ljung-Box")
 ```
-A Ljung-Box test applied to the STL remainder (lag = 24) yields X² = 261.72 (p < 0.001), decisively rejecting white noise. This indicates that systematic variation remains after trend and seasonal extraction, consistent with the influence of inter-annual precipitation variability — motivating the inclusion of precipitation as an exogenous regressor in the ARIMAX specification.  
 
+A Ljung-Box test applied to the STL remainder (lag = 24) yields X² = 261.72 (p \< 0.001), decisively rejecting white noise. This indicates that systematic variation remains after trend and seasonal extraction, consistent with the influence of inter-annual precipitation variability — motivating the inclusion of precipitation as an exogenous regressor in the ARIMAX specification.
 
-
-
----
+------------------------------------------------------------------------
 
 # Stationarity Tests
 
@@ -357,7 +351,7 @@ kpss.test(na.omit(hydro$diff_TWh))
 
 After first differencing the conflict is resolved, confirming the differenced series is stationary and suitable for ARIMA modelling.
 
----
+------------------------------------------------------------------------
 
 # Structural Break Analysis
 
@@ -492,7 +486,7 @@ hydro %>%
        y = "TWh", x = "Month")
 ```
 
----
+------------------------------------------------------------------------
 
 # Model Identification — ACF & PACF
 
@@ -530,7 +524,7 @@ hydro %>%
 We follow the Box-Jenkins identification rules on the differenced series:
 
 | Plot | What we see | What it implies |
-|------|-------------|-----------------|
+|----|----|----|
 | **PACF** | Significant spikes at lags **1, 2, 3**; cuts off sharply after lag 3 | Non-seasonal AR order: **p = 3** |
 | **ACF** | Gradual, exponential decay at non-seasonal lags | Consistent with an AR process; non-seasonal MA order: **q = 0** |
 | **PACF** at seasonal lags | Single significant spike at **lag 12**; nothing at lags 24, 36 | Seasonal AR order: **P = 1** |
@@ -568,16 +562,16 @@ plot(qlr_diff, main = "Sup-F Test: Searching for Breakpoint (Differenced Series)
 lines(breakpoints(qlr_diff))
 ```
 
----
+------------------------------------------------------------------------
 
 # Estimation
 
 We estimate four competing models:
 
-1. **Auto-ARIMA** — Hyndman-Khandakar algorithm selects the best ARIMA by AICc. Result: **ARIMA(3,0,0)(1,1,0)[12]**, with σ² = 0.811, AICc = 993.69.
-2. **Manual SARIMA(3,0,0)(1,1,0)[12]** — justified directly from the ACF/PACF above: AR(3) non-seasonal component (PACF cuts off at lag 3), SAR(1) seasonal component (single PACF spike at lag 12), one seasonal difference (D=1). This converges to the **same specification as auto-ARIMA**, confirming that the visual identification is consistent with the data-driven search.
-3. **Airline SARIMA(0,1,1)(0,1,1)[12]** — the classical Box-Jenkins benchmark for monthly seasonal data (Box & Jenkins, 1976). Applies both a regular and a seasonal difference (d=1, D=1), with MA(1) terms at the non-seasonal and seasonal levels. Result: σ² = 0.628 — notably lower than the ARIMA(3,0,0)(1,1,0) — AICc = 923.10, the best among all ARIMA models.
-4. **ETS(M,A,A)** — exponential smoothing with multiplicative errors, additive trend, and additive seasonality. Smoothing parameters: α = 0.906 (very high, weighting recent observations heavily), β ≈ 0 (near-constant trend), γ ≈ 0 (near-fixed seasonal pattern). These near-zero β and γ values confirm the visual finding from the subseries plots: the trend and seasonal shape are stable over time.
+1.  **Auto-ARIMA** — Hyndman-Khandakar algorithm selects the best ARIMA by AICc. Result: **ARIMA(3,0,0)(1,1,0)[12]**, with σ² = 0.811, AICc = 993.69.
+2.  **Manual SARIMA(3,0,0)(1,1,0)[12]** — justified directly from the ACF/PACF above: AR(3) non-seasonal component (PACF cuts off at lag 3), SAR(1) seasonal component (single PACF spike at lag 12), one seasonal difference (D=1). This converges to the **same specification as auto-ARIMA**, confirming that the visual identification is consistent with the data-driven search.
+3.  **Airline SARIMA(0,1,1)(0,1,1)[12]** — the classical Box-Jenkins benchmark for monthly seasonal data (Box & Jenkins, 1976). Applies both a regular and a seasonal difference (d=1, D=1), with MA(1) terms at the non-seasonal and seasonal levels. Result: σ² = 0.628 — notably lower than the ARIMA(3,0,0)(1,1,0) — AICc = 923.10, the best among all ARIMA models.
+4.  **ETS(M,A,A)** — exponential smoothing with multiplicative errors, additive trend, and additive seasonality. Smoothing parameters: α = 0.906 (very high, weighting recent observations heavily), β ≈ 0 (near-constant trend), γ ≈ 0 (near-fixed seasonal pattern). These near-zero β and γ values confirm the visual finding from the subseries plots: the trend and seasonal shape are stable over time.
 
 ```{r estimation}
 # --- 1. Auto-ARIMA ---
@@ -649,17 +643,17 @@ bind_rows(
 
 **Information criteria results:**
 
-| Model | AICc |
-|---|---|
-| Airline SARIMA(0,1,1)(0,1,1)[12] | **923.10** ✓ best |
-| Auto-ARIMA / Manual SARIMA(3,0,0)(1,1,0)[12] | 993.69 |
-| ETS(M,A,A) | 2122.42 |
+| Model                                        | AICc              |
+|----------------------------------------------|-------------------|
+| Airline SARIMA(0,1,1)(0,1,1)[12]             | **923.10** ✓ best |
+| Auto-ARIMA / Manual SARIMA(3,0,0)(1,1,0)[12] | 993.69            |
+| ETS(M,A,A)                                   | 2122.42           |
 
-The Airline model is preferred by a margin of **~70 AICc points** over the ARIMA(3,0,0)(1,1,0)[12] specifications. This large gap is meaningful: it reflects the fact that applying a regular difference (d=1) in the Airline model more fully removes the remaining level drift that the SAR(1) term in the ARIMA(3,0,0) was only partially capturing. By differencing, the Airline model requires only 2 parameters (ma1 = −0.146, sma1 = −0.978) to achieve a lower residual variance (σ² = 0.628 vs 0.811), illustrating the principle of parsimony — fewer parameters, better fit.
+The Airline model is preferred by a margin of **\~70 AICc points** over the ARIMA(3,0,0)(1,1,0)[12] specifications. This large gap is meaningful: it reflects the fact that applying a regular difference (d=1) in the Airline model more fully removes the remaining level drift that the SAR(1) term in the ARIMA(3,0,0) was only partially capturing. By differencing, the Airline model requires only 2 parameters (ma1 = −0.146, sma1 = −0.978) to achieve a lower residual variance (σ² = 0.628 vs 0.811), illustrating the principle of parsimony — fewer parameters, better fit.
 
 Note: ETS AICc cannot be directly compared to ARIMA AICc as they use different likelihood frameworks.
 
----
+------------------------------------------------------------------------
 
 # Diagnostic Checks
 
@@ -697,18 +691,18 @@ augment(fit_ets) %>%
   kable(digits = 4, caption = "Ljung-Box Test: ETS (lag=24)")
 ```
 
-**Ljung-Box results (H₀: no residual autocorrelation; p > 0.05 = pass):**
+**Ljung-Box results (H₀: no residual autocorrelation; p \> 0.05 = pass):**
 
 | Model | lb_stat | p-value | Verdict |
-|---|---|---|---|
-| Auto-ARIMA(3,0,0)(1,1,0)[12] | 76.37 | < 0.001 | **FAIL** — significant residual autocorrelation remains |
-| Manual SARIMA(3,0,0)(1,1,0)[12] | 76.37 | < 0.001 | **FAIL** — identical to auto-ARIMA |
+|----|----|----|----|
+| Auto-ARIMA(3,0,0)(1,1,0)[12] | 76.37 | \< 0.001 | **FAIL** — significant residual autocorrelation remains |
+| Manual SARIMA(3,0,0)(1,1,0)[12] | 76.37 | \< 0.001 | **FAIL** — identical to auto-ARIMA |
 | Airline SARIMA(0,1,1)(0,1,1)[12] | 46.35 | 0.0018 | **FAIL** — still significant, but notably lower statistic |
 | ETS(M,A,A) | 40.29 | 0.0199 | **FAIL** — marginally significant |
 
 None of the models fully pass the Ljung-Box test at lag 24, which means all leave some residual autocorrelation unexplained. However, the ranking is informative: the Airline model has the lowest lb_stat (46.35 vs 76.37 for the AR models), suggesting it captures seasonal dynamics more completely. The remaining structure likely reflects irregular weather-driven shocks (drought years) that no linear ARIMA model can absorb. For forecasting purposes, this is expected and acceptable — the residuals of all models appear close to white noise visually, with spikes concentrated at specific lags rather than systematic patterns.
 
----
+------------------------------------------------------------------------
 
 # Forecast
 
@@ -758,7 +752,7 @@ fc %>%
   theme(legend.position = "bottom")
 ```
 
----
+------------------------------------------------------------------------
 
 # Forecast Evaluation
 
@@ -772,82 +766,32 @@ accuracy(fc, hydro) %>%
 
 **Results — out-of-sample accuracy on the last 24 months:**
 
-| Model | MAE | RMSE | MAPE | MASE |
-|---|---|---|---|---|
+| Model                                | MAE       | RMSE      | MAPE      | MASE      |
+|--------------------------------------|-----------|-----------|-----------|-----------|
 | **Airline SARIMA(0,1,1)(0,1,1)[12]** | **0.618** | **0.838** | **5.107** | **0.474** |
-| ETS(M,A,A) | 0.650 | 0.911 | 5.585 | 0.499 |
-| Auto-ARIMA(3,0,0)(1,1,0)[12] | 0.990 | 1.233 | 8.044 | 0.759 |
-| Manual SARIMA(3,0,0)(1,1,0)[12] | 1.037 | 1.275 | 8.399 | 0.796 |
+| ETS(M,A,A)                           | 0.650     | 0.911     | 5.585     | 0.499     |
+| Auto-ARIMA(3,0,0)(1,1,0)[12]         | 0.990     | 1.233     | 8.044     | 0.759     |
+| Manual SARIMA(3,0,0)(1,1,0)[12]      | 1.037     | 1.275     | 8.399     | 0.796     |
 
 **Why did the Airline model win?**
 
 The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] models on every metric, with a MASE of 0.474 compared to 0.759–0.796 — roughly 37% lower forecast error. There are three interconnected reasons for this:
 
-1. **Double differencing handles drift better.** The ARIMA(3,0,0)(1,1,0)[12] uses a SAR(1) term to model the seasonal pattern, which imposes a fixed autoregressive structure on the seasonal dynamics. The Airline model instead differences at both the regular (d=1) and seasonal (D=1) level before fitting, which more aggressively removes any slow drift in either the level or the seasonal pattern. Over a 24-month forecast horizon, small drifts compound — the Airline model's pre-differencing approach adapts better to gradual shifts that occurred in the test period (April 2024 – March 2026).
+1.  **Double differencing handles drift better.** The ARIMA(3,0,0)(1,1,0)[12] uses a SAR(1) term to model the seasonal pattern, which imposes a fixed autoregressive structure on the seasonal dynamics. The Airline model instead differences at both the regular (d=1) and seasonal (D=1) level before fitting, which more aggressively removes any slow drift in either the level or the seasonal pattern. Over a 24-month forecast horizon, small drifts compound — the Airline model's pre-differencing approach adapts better to gradual shifts that occurred in the test period (April 2024 – March 2026).
 
-2. **The sma1 coefficient = −0.978 is near the boundary of −1**, which in practice means the seasonal MA term is acting almost like an additional seasonal difference. This is a known empirical pattern for hydro and energy data where the seasonal pattern itself evolves slowly — the model is essentially self-correcting every year.
+2.  **The sma1 coefficient = −0.978 is near the boundary of −1**, which in practice means the seasonal MA term is acting almost like an additional seasonal difference. This is a known empirical pattern for hydro and energy data where the seasonal pattern itself evolves slowly — the model is essentially self-correcting every year.
 
-3. **Parsimony pays off.** The Airline model uses only 2 parameters (ma1, sma1) versus 4 in the AR models (ar1, ar2, ar3, sar1). With 390 training observations this is not an overfitting concern per se, but the lower parameter count means the model is less sensitive to the specific AR dynamics of the training period that may not replicate perfectly in the test window.
+3.  **Parsimony pays off.** The Airline model uses only 2 parameters (ma1, sma1) versus 4 in the AR models (ar1, ar2, ar3, sar1). With 390 training observations this is not an overfitting concern per se, but the lower parameter count means the model is less sensitive to the specific AR dynamics of the training period that may not replicate perfectly in the test window.
 
 **Why did ETS come second?** ETS(M,A,A) with α = 0.906 is essentially a very short-memory model that heavily discounts past observations in favour of the most recent level. This makes it resilient to level changes. Its MASE of 0.499 is close to the Airline model, suggesting that for this series, rapid adaptation to the current level matters more than precisely modelling the autoregressive dynamics.
 
 **All MASE values are below 1**, confirming that every model outperforms the naïve seasonal benchmark (repeat last year's value). The winning Airline model achieves a MAPE of 5.1%, meaning forecasts are on average 5.1% off — a reasonable result for a 24-month horizon on a weather-dependent series.
 
----
+------------------------------------------------------------------------
 
-# ARIMAX: Improving forecasting with reservoir fill rate data
+# ARIMAX: Improving forecasting with reservoir fill data
 
-## Data Loading: Reservoir Inflow
-
-```{r load_data_inflow}
-# ==============================================================================
-# File 1: Reservoir Inflow — Weekly, 1958–2026, GWh (→ TWh)
-# Source: NVE (2026), https://www.nve.no/energi/analyser-og-statistikk/hydrologiske-data-til-kraftsituasjonsrapporten/
-# ==============================================================================
-# NB: Useful inflow is drawn from NVE's production-based calculation (derived 
-# from turbine metering and reservoir level measurements) from 2000 onwards, and 
-# from the HBV hydrological model for earlier observations. We combine them into 
-# one unified series. The production-based method (adopted in 2015 and back-
-# -calculated until 2000) is preferred as it relies on direct measurements 
-# rather than simulated estimates; the HBV series is used solely to extend the 
-# descriptive history prior to 2000 and is not used in model estimation.
-# ──────────────────────────────────────────────────────────────────────────────
-
-# 1. Load data
-raw_inflow <- read_csv("data/NVE_ReservoirInflow_1958-2026_GWh.csv",
-                       show_col_types = FALSE)
-# Inspect
-glimpse(raw_inflow)
-
-# 2. Filter and transmute relevant data and convert to a tsibble
-inflow <- raw_inflow %>%
-  filter(`Område` == "NO") %>%                   # national aggregate only
-  rename(
-    inflow_post2000_GWh = `Nyttbart tilsig (produksjonsdata og magasinstatistikk, brukes f.o.m. 2015)`,
-    inflow_pre2000_GWh  = `Nyttbart tilsig HBV (brukes før 2015 og til min/maks/gj.snitt)`
-  ) %>%
-  transmute(
-    # Build a standard date from year + week number
-    year_week         = yearweek(paste0(`År`, " W", sprintf("%02d", `Uke`))),
-    # Combine the two inflow methods into one column (primary regressor):
-    # production-based is preferred when available (2000 onwards),
-    # HBV model is used for all earlier observations and recent weeks
-    # where production-based has not yet been published.
-    useful_inflow_TWh = if_else(
-      !is.na(inflow_post2000_GWh),
-      inflow_post2000_GWh,
-      inflow_pre2000_GWh
-    ) / 1000,                                    # convert GWh → TWh
-    precip_energy_TWh      = `Nedbørsenergi`      / 1000,
-    runoff_groundwater_TWh = `Mark-og grunnvann`  / 1000,
-    snow_TWh               = `Snø`                / 1000
-  ) %>%
-  arrange(year_week) %>%    # sort ascending (raw file is descending)
-  as_tsibble(index = year_week)
-
-# Inspect
-glimpse(inflow)
-```
+## Data Loading: Reservoir Fill
 
 ```{r load_data_fill_rate}
 # ==============================================================================
@@ -890,7 +834,7 @@ fill_rate <- raw_fill_rate %>%
 glimpse(fill_rate)
 ```
 
-## Reservoir Data — Monthly Aggregation and Join
+## Reservoir Data — Monthly Aggregation, EDA and Join
 
 ```{r reservoir_monthly}
 # ==============================================================================
@@ -898,20 +842,7 @@ glimpse(fill_rate)
 # Method: aggregate weekly → monthly, then inner-join on Month
 # ==============================================================================
 
-# 1. Aggregate inflow to monthly (sum weekly inflows within each month)
-# Inflow is a flow variable — it measures a quantity accumulating over time.
-# Therefore, we sum the values.
-
-inflow_monthly <- inflow %>%
-  index_by(Month = yearmonth(year_week)) %>%
-  summarise(
-    inflow_TWh             = sum(useful_inflow_TWh,      na.rm = TRUE),
-    precip_energy_TWh      = sum(precip_energy_TWh,      na.rm = TRUE),
-    runoff_groundwater_TWh = sum(runoff_groundwater_TWh, na.rm = TRUE),
-    snow_TWh               = sum(snow_TWh,               na.rm = TRUE)
-  )
-
-# 2. Aggregate fill rate to monthly (mean level within each month)
+# Aggregate fill rate to monthly (mean level within each month)
 # Fill rate is a stock variable — it measures a level at a point in time. The 
 # monthly fill rate should represent the average state of the reservoir system 
 # over the month, not the total. Therefore, we compute the mean – the standard 
@@ -924,20 +855,59 @@ fill_rate_monthly <- fill_rate %>%
     capacity_TWh    = first(capacity_TWh) # constant: identical across all weeks
   )
 
-# 3. Join inflow with hydro production and create lagged inflow variable
-reservoir_inflow <- hydro %>%
-  inner_join(inflow_monthly, by = "Month") %>%
-  arrange(Month) %>%
-  mutate(
-    inflow_TWh_lag1 = lag(inflow_TWh, 1)
-  ) %>%
-  filter(!is.na(inflow_TWh_lag1)) %>%
-  as_tsibble(index = Month)
 
-# Inspect
-glimpse(reservoir_inflow)
+fill_rate_monthly %>% has_gaps()
+fill_rate_monthly %>% scan_gaps()
 
-# 4. Join fill rate with hydro production and create lagged fill rate variable
+# Visual inspection 
+
+fill_rate_monthly %>%
+  autoplot(fill_rate_mean) +
+  labs(title = "Monthly Reservoir Fill Rate — Norway", y = "Fill Rate", x = NULL)
+
+#stationary test
+
+cat("\n=== ADF Test: Fill Rate ===\n")
+adf.test(fill_rate_monthly$fill_rate_mean)
+
+cat("\n=== KPSS Test: Fill Rate ===\n")
+fill_rate_monthly %>% features(fill_rate_mean, unitroot_kpss)
+
+cat("\n=== Differences needed: Fill Rate ===\n")
+fill_rate_monthly %>% features(fill_rate_mean, unitroot_ndiffs)
+fill_rate_monthly %>% features(fill_rate_mean, unitroot_nsdiffs)
+
+#The monthly reservoir fill rate oscillates between roughly 0.20 and 0.95 throughout the entire sample, tracing a sharp and consistent annual cycle: reservoirs drain over winter as generation meets heating demand, then refill rapidly in spring and early summer as snowmelt and precipitation replenish the system. This pattern repeats stably across all 30 years with no visible long-run trend in the mean level, consistent with the ADF and KPSS tests both confirming stationarity in levels. The amplitude of the cycle does vary across years however — notably shallow troughs appear around 2003 and 2010, corresponding to dry years where reservoirs failed to drain as deeply, while 1996 and 2009 show unusually low winter minima. These year-to-year differences in the depth of the seasonal trough are precisely the variation that makes fill rate a useful exogenous regressor: it captures hydrological conditions that the purely temporal ARIMA structure cannot.
+
+```
+
+```{r seasonal}
+fill_rate_monthly %>%
+  gg_season(fill_rate_mean) +
+  labs(title = "Seasonal Plot: Reservoir Fill Rate", y = "Fill Rate")
+
+#The seasonal plot confirms the regularity of the annual cycle across all years. Reservoirs consistently reach their minimum fill rate between March and April — the end of the winter draw-down period — before refilling rapidly through May and June as snowmelt drives inflow. Peak levels are reached between August and October, after which the cycle restarts. The shape is remarkably uniform across years, with all lines following the same inverted U-path. The main source of year-to-year variation is in the level, not the shape: some years enter winter already well-stocked (lines starting above 0.65 in January) while others, such as the orange line visible at the bottom, begin from a much lower base and never fully recover — likely corresponding to a drought year where the summer refill was insufficient. This level variation, persistent across months within a given year, is what the lagged fill rate regressor captures in the ARIMAX model.
+```
+
+```{r structural break test}
+fill_df <- fill_rate_monthly %>%
+  as_tibble() %>%
+  mutate(Lag1 = lag(fill_rate_mean)) %>%
+  filter(!is.na(Lag1))
+
+qlr_fill <- Fstats(fill_rate_mean ~ Lag1, data = fill_df, from = 0.15)
+sctest(qlr_fill, type = "supF")
+
+plot(qlr_fill,
+     main = "Sup-F Test: Reservoir Fill Rate")
+lines(breakpoints(qlr_fill))
+
+#The F-statistics are essentially noise. P-value = 1 → fail to reject H₀ → no structural break detected
+```
+
+```{r join of data}
+
+# Join fill rate with hydro production and create lagged fill rate variable
 reservoir_fill_rate <- hydro %>%
   inner_join(fill_rate_monthly, by = "Month") %>%
   arrange(Month) %>%
@@ -950,152 +920,6 @@ reservoir_fill_rate <- hydro %>%
 
 # Inspect
 glimpse(reservoir_fill_rate)
-```
-
-
-## ARIMAX Modelling: Inflow
-
-```{r ARIMAX_inflow}
-train_arimax_inflow <- reservoir_inflow %>%
-  filter(Month <= max(Month) - 24)
-
-test_arimax_inflow <- reservoir_inflow %>%
-  filter(Month > max(Month) - 24)
-
-fit_arimax_inflow <- train_arimax_inflow %>%
-  model(
-    ARIMAX_Airline = ARIMA(
-      TWh ~ inflow_TWh_lag1 +
-        pdq(0, 1, 1) +
-        PDQ(0, 1, 1)
-    ),
-    ARIMAX_Manual = ARIMA(
-      TWh ~ inflow_TWh_lag1 +
-        pdq(3, 0, 0) +
-        PDQ(1, 1, 0)
-    ),
-    ARIMAX_Auto = ARIMA(
-      TWh ~ inflow_TWh_lag1
-    )
-  )
-
-glance(fit_arimax_inflow)
-```
-
-## Model Insights: Inflow
-```{r arimax_model_insights_inflow, message=FALSE, warning=FALSE}
-# ==============================================================================
-# Purpose
-# This section evaluates whether reservoir inflow improves the forecasting model.
-# We first inspect the best ARIMAX specification, then compare it against the
-# univariate benchmark models on the same train-test split.
-# ==============================================================================
-
-# ==============================================================================
-# 1. Inspect the selected ARIMAX model
-# ==============================================================================
-
-fit_arimax_inflow %>%
-  select(ARIMAX_Auto) %>%
-  report()
-
-coef_arimax_inflow <- tidy(fit_arimax_inflow) %>%
-  filter(.model == "ARIMAX_Auto")
-
-coef_arimax_inflow %>%
-  select(term, estimate, std.error, statistic, p.value) %>%
-  kable(
-    digits  = 4,
-    align   = "c",
-    caption = "ARIMAX_Auto coefficient estimates — inflow regressor"
-  )
-
-# ==============================================================================
-# 2. Forecast performance of ARIMAX candidates
-# ==============================================================================
-
-fc_arimax_inflow <- fit_arimax_inflow %>%
-  forecast(new_data = test_arimax_inflow)
-
-accuracy(fc_arimax_inflow, reservoir_inflow) %>%
-  select(.model, RMSE, MAE, MAPE, MASE) %>%
-  arrange(MASE) %>%
-  kable(
-    digits  = 3,
-    align   = "c",
-    caption = "Forecast accuracy of ARIMAX inflow candidate models"
-  )
-
-# ==============================================================================
-# 3. Residual diagnostics for the selected ARIMAX model
-# ==============================================================================
-
-fit_arimax_inflow %>%
-  select(ARIMAX_Auto) %>%
-  gg_tsresiduals()
-
-lb_arimax_inflow_auto <- augment(fit_arimax_inflow %>% select(ARIMAX_Auto)) %>%
-  features(.innov, ljung_box, lag = 24, dof = 5)
-
-lb_arimax_inflow_auto
-
-lb_arimax_inflow_auto_dof6 <- augment(fit_arimax_inflow %>% select(ARIMAX_Auto)) %>%
-  features(.innov, ljung_box, lag = 24, dof = 6)
-
-lb_arimax_inflow_auto_dof6
-
-# ==============================================================================
-# 4. Refit all benchmark models on the common ARIMAX sample
-# ==============================================================================
-
-fit_common_inflow <- train_arimax_inflow %>%
-  model(
-    Auto_ARIMA     = ARIMA(TWh),
-    Manual_SARIMA  = ARIMA(TWh ~ pdq(3, 0, 0) + PDQ(1, 1, 0)),
-    Airline_SARIMA = ARIMA(TWh ~ pdq(0, 1, 1) + PDQ(0, 1, 1)),
-    ETS            = ETS(TWh),
-    ARIMAX_Auto    = ARIMA(TWh ~ inflow_TWh_lag1)
-  )
-
-glance(fit_common_inflow) %>%
-  select(.model, sigma2, log_lik, AIC, AICc, BIC) %>%
-  arrange(AICc) %>%
-  kable(
-    digits  = 3,
-    align   = "c",
-    caption = "Information criteria — common sample, inflow regressor"
-  )
-
-# ==============================================================================
-# 5. Final out-of-sample forecast comparison
-# ==============================================================================
-
-fc_common_inflow <- fit_common_inflow %>%
-  forecast(new_data = test_arimax_inflow)
-
-accuracy(fc_common_inflow, reservoir_inflow) %>%
-  select(.model, RMSE, MAE, MAPE, MASE) %>%
-  arrange(MASE) %>%
-  kable(
-    digits  = 3,
-    align   = "c",
-    caption = "Forecast accuracy on the common 24-month test set — inflow"
-  )
-
-# ==============================================================================
-# 6. Forecast plot
-# ==============================================================================
-
-fc_common_inflow %>%
-  filter(.model %in% c("ETS", "Airline_SARIMA", "ARIMAX_Auto")) %>%
-  autoplot(reservoir_inflow, level = 80) +
-  labs(
-    title    = "24-Month Forecast Comparison — Inflow Regressor",
-    subtitle = "Best univariate models vs ARIMAX (inflow)",
-    y        = "Hydro power generation (TWh)",
-    x        = NULL
-  ) +
-  theme(legend.position = "bottom")
 ```
 
 ## ARIMAX Modelling: Fill Rate
@@ -1128,6 +952,7 @@ glance(fit_arimax_fill_rate)
 ```
 
 ## Model Insights: Fill Rate
+
 ```{r arimax_model_insights_fill_rate, message=FALSE, warning=FALSE}
 # ==============================================================================
 # Purpose
@@ -1242,120 +1067,129 @@ fc_common_fill_rate %>%
   ) +
   theme(legend.position = "bottom")
 ```
+
 # EXPLANATION
 
 ## Paired comparison
 
----
+------------------------------------------------------------------------
 
 ### Pair 1 — ARIMAX candidate model fit (glance)
+
 **Inflow (Image 8) vs Fill Rate (Image 16)**
 
-| | ARIMAX_Auto AICc | ARIMAX_Airline AICc | ARIMAX_Manual AICc |
-|---|---|---|---|
-| Inflow | 834.90 | 862.55 | 929.63 |
-| Fill rate | **739.65** | **773.60** | **809.23** |
+|           | ARIMAX_Auto AICc | ARIMAX_Airline AICc | ARIMAX_Manual AICc |
+|-----------|------------------|---------------------|--------------------|
+| Inflow    | 834.90           | 862.55              | 929.63             |
+| Fill rate | **739.65**       | **773.60**          | **809.23**         |
 
 Fill rate produces substantially better in-sample fit across all three ARIMAX specifications — a gap of roughly 95 AICc points on the Auto model. This is a large and meaningful difference, not a marginal one. Fill rate is the clearly superior regressor in terms of model fit.
 
----
+------------------------------------------------------------------------
 
 ### Pair 2 — Coefficient estimates (ARIMAX_Auto)
+
 **Inflow (Image 1) vs Fill Rate (Image 15)**
 
-| | Regressor coefficient | p-value | ARIMA error structure |
-|---|---|---|---|
-| Inflow | 0.0336 | <0.001 | ARIMA(1,0,1)(0,1,2)[12] |
-| Fill rate | 0.0872 | <0.001 | ARIMA(1,0,1)(1,1,2)[12] |
+|           | Regressor coefficient | p-value | ARIMA error structure   |
+|-----------|-----------------------|---------|-------------------------|
+| Inflow    | 0.0336                | \<0.001 | ARIMA(1,0,1)(0,1,2)[12] |
+| Fill rate | 0.0872                | \<0.001 | ARIMA(1,0,1)(1,1,2)[12] |
 
 Both regressors are highly significant. The fill rate coefficient is larger in magnitude relative to its scale — a one percentage point increase in last month's fill rate is associated with 0.087 TWh more generation this month. The inflow coefficient of 0.034 means one additional TWh of inflow last month adds 0.034 TWh of generation. Economically both make sense but fill rate's larger t-statistic (10.39 vs 4.69) suggests a stronger signal. Crucially, however, several ARIMA error coefficients in the fill rate model are not significant (ma1, sar1, sma1, sma2), suggesting the automatic order selection may be overfitting the error structure.
 
----
+------------------------------------------------------------------------
 
 ### Pair 3 — ARIMAX candidate out-of-sample accuracy
+
 **Inflow (Image 2) vs Fill Rate (Image 14)**
 
-| | Best candidate | MASE | Runner-up | MASE |
-|---|---|---|---|---|
-| Inflow | ARIMAX_Airline | 0.468 | ARIMAX_Auto | 0.584 |
-| Fill rate | ARIMAX_Auto | 0.500 | ARIMAX_Airline | 0.606 |
+|           | Best candidate | MASE  | Runner-up      | MASE  |
+|-----------|----------------|-------|----------------|-------|
+| Inflow    | ARIMAX_Airline | 0.468 | ARIMAX_Auto    | 0.584 |
+| Fill rate | ARIMAX_Auto    | 0.500 | ARIMAX_Airline | 0.606 |
 
 For inflow, the Airline specification beats the Auto. For fill rate, the Auto beats the Airline. This is an important reversal — the automatic ARIMA error selection works better when fill rate is the regressor, suggesting the automatic order captures the fill rate dynamics more effectively than the manually imposed Airline structure.
 
----
+------------------------------------------------------------------------
 
 ### Pair 4 — Ljung-Box residual test (dof=5)
+
 **Inflow (Image 3) vs Fill Rate (Image 12)**
 
-| | lb_stat | lb_pvalue |
-|---|---|---|
-| Inflow | 33.999 | 0.0184 |
-| Fill rate | 32.252 | 0.0205 |
+|           | lb_stat | lb_pvalue |
+|-----------|---------|-----------|
+| Inflow    | 33.999  | 0.0184    |
+| Fill rate | 32.252  | 0.0205    |
 
 Both models fail the Ljung-Box test at the 5% level, meaning residual autocorrelation remains in both. Neither ARIMAX_Auto has fully white-noise innovations. Fill rate is marginally better (slightly lower statistic) but both are problematic. This is the most important diagnostic concern in your analysis.
 
----
+------------------------------------------------------------------------
 
 ### Pair 5 — Ljung-Box residual test (dof=6)
+
 **Inflow (Image 4) vs Fill Rate (Image 13)**
 
-| | lb_stat | lb_pvalue |
-|---|---|---|
-| Inflow | 33.999 | 0.0126 |
-| Fill rate | 32.252 | 0.0293 |
+|           | lb_stat | lb_pvalue |
+|-----------|---------|-----------|
+| Inflow    | 33.999  | 0.0126    |
+| Fill rate | 32.252  | 0.0293    |
 
 Adding one degree of freedom for the external regressor makes the p-values more conservative. Inflow now rejects more strongly (0.013) while fill rate remains marginal but still significant at 5% (0.029). Both remain failures. Worth noting in your report that the correct dof is debated — counting the regressor as an estimated parameter (dof=6) is the more conservative and defensible choice.
 
----
+------------------------------------------------------------------------
 
 ### Pair 6 — Information criteria on common sample
+
 **Inflow (Image 5) vs Fill Rate (Image 11)**
 
-| Model | Inflow AICc | Fill Rate AICc |
-|---|---|---|
-| ARIMAX_Auto | 834.90 | **739.65** |
-| Auto_ARIMA | 873.15 | 900.11 |
-| Airline_SARIMA | 879.68 | 835.43 |
-| Manual_SARIMA | 947.45 | 896.84 |
-| ETS | 2029.97 | 1891.23 |
+| Model          | Inflow AICc | Fill Rate AICc |
+|----------------|-------------|----------------|
+| ARIMAX_Auto    | 834.90      | **739.65**     |
+| Auto_ARIMA     | 873.15      | 900.11         |
+| Airline_SARIMA | 879.68      | 835.43         |
+| Manual_SARIMA  | 947.45      | 896.84         |
+| ETS            | 2029.97     | 1891.23        |
 
 Two things stand out. First, fill rate ARIMAX_Auto dominates everything in both tables by a wide margin. Second, ETS information criteria are incomparable to ARIMA-type models (different likelihood structures) — the enormous ETS values reflect this, not poor ETS performance. Do not rank ETS based on AIC in your report.
 
----
+------------------------------------------------------------------------
 
 ### Pair 7 — Final 24-month test set accuracy on common sample
+
 **Inflow (Image 6) vs Fill Rate (Image 10)**
 
-| Model | Inflow MASE | Fill Rate MASE |
-|---|---|---|
-| ETS | 0.489 | **0.464** |
-| Airline_SARIMA | **0.483** | 0.469 |
-| ARIMAX_Auto | 0.584 | 0.500 |
-| Auto_ARIMA | 0.587 | 0.759 |
-| Manual_SARIMA | 0.808 | 0.791 |
+| Model          | Inflow MASE | Fill Rate MASE |
+|----------------|-------------|----------------|
+| ETS            | 0.489       | **0.464**      |
+| Airline_SARIMA | **0.483**   | 0.469          |
+| ARIMAX_Auto    | 0.584       | 0.500          |
+| Auto_ARIMA     | 0.587       | 0.759          |
+| Manual_SARIMA  | 0.808       | 0.791          |
 
 This is the most important table in the analysis. Three findings stand out. First, ARIMAX does not beat the best univariate models in either case — Airline_SARIMA edges out everything for inflow, ETS edges out everything for fill rate. Second, ARIMAX with fill rate (MASE=0.500) is much closer to the best univariate model than ARIMAX with inflow (MASE=0.584), confirming fill rate as the more useful regressor. Third, despite better in-sample AICc, ARIMAX underperforms out-of-sample — a classic overfitting signal worth discussing explicitly in your methodology section.
 
----
+------------------------------------------------------------------------
 
 ### Pair 8 — Forecast plots
+
 **Inflow (Image 7) vs Fill Rate (Image 9)**
 
 Both plots tell a similar story visually: the three models (Airline_SARIMA, ETS, ARIMAX_Auto) produce forecasts that are tightly clustered and broadly track the last observed seasonal pattern. The 80% confidence intervals are narrow relative to historical variation, which reflects the strong seasonal regularity of Norwegian hydro production. No model captures the extreme 2022 trough well — visible in both plots as the large dip just before the forecast window — which partly explains why out-of-sample MASE is higher than in-sample fit suggests.
 
----
+------------------------------------------------------------------------
 
 ## Overall takeaway
 
 Fill rate is the better regressor on every in-sample metric by a substantial margin. Out-of-sample, it is also better than inflow as a regressor, though neither ARIMAX beats the best univariate model. The residual autocorrelation failure in both models is the main weakness to address in your report — one honest framing is that the ARIMA error structure has not fully absorbed the remaining dynamics, and that a richer lag structure or a different differencing specification might resolve it. The key result to lead with in your conclusions is that fill rate carries genuine predictive signal (highly significant coefficient, lower AICc) but that the gain in forecast accuracy over a well-specified seasonal ARIMA is modest in this case.
 
----
+------------------------------------------------------------------------
 
 # ARIMAX Model Insights - Fill rate specific (INCLUDE IN REPORT)
 
 To extend the univariate forecasting models, we estimate ARIMAX models using reservoir fill rate as an external regressor. The reservoir data are provided at weekly frequency and are first aggregated to monthly frequency by taking the average fill rate within each month. Since the hydro generation series is also monthly, the aggregated reservoir data can then be joined with the hydro production data by month.
 
-The external regressor used in the ARIMAX model is the one-month lagged reservoir fill rate, expressed in percentage points. This means that hydro generation in month \(t\) is explained using the reservoir fill rate from month \(t-1\). This avoids using information from the forecast month itself and makes the model more suitable for forecasting.
+The external regressor used in the ARIMAX model is the one-month lagged reservoir fill rate, expressed in percentage points. This means that hydro generation in month $t$ is explained using the reservoir fill rate from month $t-1$. This avoids using information from the forecast month itself and makes the model more suitable for forecasting.
 
 Three ARIMAX specifications are estimated. The first extends the Airline SARIMA benchmark with the lagged fill rate. The second extends the manually identified SARIMA specification. The third allows the ARIMA error structure to be selected automatically while keeping the lagged fill rate as an external regressor.
 
@@ -1371,11 +1205,9 @@ The final out-of-sample accuracy results show that ARIMAX does not outperform th
 
 Overall, the ARIMAX extension provides useful explanatory insight: reservoir fill rate contains relevant information for hydro power generation. However, the best univariate models, especially ETS and Airline SARIMA, already capture most of the predictable seasonal structure in the series. Therefore, ARIMAX adds interpretive value but only limited incremental forecasting value in this setting.
 
+*José's conclusion:* Although fill rate is a statistically significant predictor of hydro generation with a substantially lower AICc than univariate benchmarks, ETS achieves marginally better out-of-sample accuracy with fewer parameters, by tracking the dominant seasonal pattern — suggesting that the incremental predictive content of fill rate, conditional on seasonality, is limited over a 24-month horizon.
 
-*José's conclusion:*
-Although fill rate is a statistically significant predictor of hydro generation with a substantially lower AICc than univariate benchmarks, ETS achieves marginally better out-of-sample accuracy with fewer parameters, by tracking the dominant seasonal pattern — suggesting that the incremental predictive content of fill rate, conditional on seasonality, is limited over a 24-month horizon.
-
----
+------------------------------------------------------------------------
 
 # Appendix — Save Processed Data
 
