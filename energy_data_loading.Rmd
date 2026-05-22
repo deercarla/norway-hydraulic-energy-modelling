@@ -1,0 +1,85 @@
+---
+title: "hydro-data"
+author: "carla"
+date: "2026-05-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(lubridate)
+library(tsibble)
+
+options(max.print=4)
+
+```
+
+# Loading Raw Norwegian Dataset and Transformations
+
+## Load
+
+```{r load}
+raw_hydro <- read_delim(
+  "data/hydro-dataset.csv",
+  delim = ";",
+  skip = 1,
+  show_col_types = FALSE
+)
+```
+
+The format is messy and only two rows, not printed because of large output.
+
+## Clean and reshape monthly electricity data
+```{r clean}
+hydro_long <- raw_hydro %>%
+  rename(series = 1) %>%
+  pivot_longer(
+    cols = -series,
+    names_to = "Month_raw",
+    values_to = "MWh"
+  ) %>%
+  mutate(
+    Month_raw = str_remove(Month_raw, "Electricity power "),
+    Month = yearmonth(str_replace(Month_raw, "M", " ")),
+    TWh = as.numeric(MWh) / 1e6
+  ) %>%
+  select(series, Month, TWh)
+```
+
+
+## Dataset 1: Total electricity generation, Norway
+```{r total}
+
+total_electricity_norway <- hydro_long %>%
+  filter(series == "1 Total electricity generation") %>%
+  select(Month, TWh)
+
+write_csv(
+  total_electricity_norway,
+  "data/total_electricity_norway.csv"
+)
+
+glimpse(total_electricity_norway)
+```
+
+
+## Dataset 2: Hydro power generation, Norway
+```{r hydro}
+hydro_norway <- hydro_long %>%
+  filter(series == "1.1 Hydro power generation") %>%
+  select(Month, TWh) %>%
+  arrange(Month) %>%
+  mutate(
+    log_TWh = log(TWh),
+    diff_TWh = TWh - lag(TWh)
+  )
+
+write_csv(
+  hydro_norway,
+  "data/hydro_norway.csv"
+)
+
+glimpse(hydro_norway)
+```
