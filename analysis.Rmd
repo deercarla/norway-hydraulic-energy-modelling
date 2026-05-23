@@ -15,6 +15,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
                       fig.width = 10, fig.height = 5)
 
+library(vars)
 library(tidyverse)
 library(tsibble)
 library(fable)
@@ -23,7 +24,6 @@ library(tseries)
 library(strucchange)
 library(knitr)
 library(lubridate)
-library(vars)
 library(lmtest)
 ```
 
@@ -920,77 +920,119 @@ cor.test(reservoir_fill_rate$fill_rate_pct_lag1,
 ```
 r = 0.447 → moderate positive linear correlation between last month's fill rate and this month's hydro generation.
 
-## Granger
-```{r granger}
-# Granger test: does fill rate help predict hydro?
-cat("\n=== Granger Test: Fill Rate → Hydro ===\n")
-grangertest(TWh_sdiff ~ fill_rate_sdiff,
-            order = 1,
-            data  = granger_data)
+## Prepare data for Granger and VAR
 
-# Granger test: does hydro help predict fill rate? (reverse direction)
-cat("\n=== Granger Test: Hydro → Fill Rate ===\n")
-grangertest(fill_rate_sdiff ~ TWh_sdiff,
-            order = 1,
-            data  = granger_data)
-```
-The Granger causality test reveals a strongly significant effect of fill rate on hydro generation (F = 86.27, p < 0.001), confirming that last month's reservoir fill rate provides substantial predictive information for current generation beyond the series' own history. The reverse direction is also significant but considerably weaker (F = 5.50, p = 0.020), indicating a bidirectional relationship: while generation levels feed back into reservoir state, the dominant predictive channel runs from fill rate to generation. 
+```{r}
+## Prepare data for Granger and VAR
 
-##VAR
-```{r VAR}
-
-# Use the seasonally differenced series already created
 var_tsibble <- reservoir_fill_rate %>%
   mutate(
-    TWh_sdiff       = difference(TWh,           lag = 12),
+    TWh_sdiff = difference(TWh, lag = 12),
     fill_rate_sdiff = difference(fill_rate_pct, lag = 12)
   ) %>%
-  filter(!is.na(TWh_sdiff), !is.na(fill_rate_sdiff))
+  filter(!is.na(TWh_sdiff), !is.na(fill_rate_sdiff)) %>%
+  select(Month, TWh_sdiff, fill_rate_sdiff)
+```
+
+## Plot seasonally differenced series
+
+```{r}
+## Plot seasonally differenced series
+
+var_tsibble %>%
+  pivot_longer(
+    cols = c(TWh_sdiff, fill_rate_sdiff),
+    names_to = "variable",
+    values_to = "value"
+  ) %>%
+  ggplot(aes(x = Month, y = value)) +
+  geom_line() +
+  facet_grid(vars(variable), scales = "free_y") +
+  labs(
+    title = "Hydro Generation and Reservoir Fill Rate",
+    subtitle = "Seasonally differenced series",
+    x = NULL,
+    y = "Differenced value"
+  ) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Granger
+
+```{r granger}
+## Granger causality tests
+
+granger_data <- var_tsibble %>%
+  as.data.frame()
+
+cat("\n=== Granger Test: Fill Rate -> Hydro ===\n")
+grangertest(TWh_sdiff ~ fill_rate_sdiff,
+            order = 1,
+            data = granger_data)
+
+cat("\n=== Granger Test: Hydro -> Fill Rate ===\n")
+grangertest(fill_rate_sdiff ~ TWh_sdiff,
+            order = 1,
+            data = granger_data)
+```
+The Granger causality tests indicate a strongly significant predictive relationship from reservoir fill rate to hydro generation (F = 86.27, p < 0.001). This suggests that last month’s reservoir fill rate contains substantial information for predicting current hydro generation beyond the series’ own history. The reverse direction is also statistically significant but much weaker (F = 5.50, p = 0.020), indicating some bidirectional predictive relationship. However, the dominant predictive channel runs from reservoir fill rate to hydro generation.
+
+##VAR Modelling
+
+```{r VAR}
+## VAR models
+
 fit_var <- var_tsibble %>%
   model(
     aicc = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff)),
     bic  = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff), ic = "bic")
   )
 
-# Check which lag orders were selected
 fit_var
 ```
 AICC --> Prefers richer model, better for forecasting
 BIC --> Penalises complexity more, prefers parsimony
 
+## Compare VAR models
+
 ```{r plot series}
-var_tsibble %>%
-  pivot_longer(c(TWh_sdiff, fill_rate_sdiff),
-               names_to  = "variable",
-               values_to = "value") %>%
-  ggplot(aes(x = Month, y = value)) +
-  geom_line() +
-  facet_grid(vars(variable), scales = "free_y") +
-  labs(title = "Hydro Generation and Fill Rate (seasonally differenced)",
-       y     = "Differenced value",
-       x     = NULL) +
-  theme(plot.title = element_text(hjust = 0.5))
-```
-```{r fit var}
-fit_var <- var_tsibble %>%
-  model(
-    aicc = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff)),
-    bic  = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff), ic = "bic")
-  )
+## Compare VAR models
 
-# Check which lag orders were selected
-fit_varfit_var <- var_tsibble %>%
-  model(
-    aicc = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff)),
-    bic  = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff), ic = "bic")
-  )
-
-# Check which lag orders were selected
-fit_var
+glance(fit_var) %>%
+  select(.model, AIC, AICc, BIC) %>%
+  arrange(AICc)
 ```
 
+The information criteria compare the AICc-selected VAR model with the BIC-selected VAR model. Lower values indicate a better trade-off between model fit and complexity. The AICc model has the lowest AIC and AICc, so it is preferred if the goal is forecasting. The BIC model has the lowest BIC, meaning it is more parsimonious and penalizes complexity more strongly. For this project, the AICc model is more relevant for forecast performance, while the BIC model is useful as a simpler robustness check.
 
+## VAR coefficients
+```{r}
+fit_var %>%
+  tidy() %>%
+  select(.model, term, .response, estimate, std.error, statistic, p.value)
+```
 
+The VAR coefficient estimates show that reservoir fill rate contains significant predictive information for hydro generation. In both the AICc and BIC specifications, the first lag of reservoir fill rate enters the hydro equation positively and is highly statistically significant. Hydro generation is also strongly persistent, as its own first lag is positive and significant in both models. In the fill-rate equation, the strongest effects come from the fill rate’s own lagged values, indicating substantial persistence in reservoir conditions. Overall, the coefficient estimates support the Granger causality results: the dominant predictive channel runs from reservoir fill rate to hydro generation, although some bidirectional dynamics are also present.
+
+## Residual diagnostics: hydro equation
+```{r}
+fit_var %>%
+  select(aicc) %>%
+  residuals() %>%
+  gg_tsdisplay(TWh_sdiff, plot_type = "hist")
+```
+The residual diagnostics for the hydro equation show that most residuals fluctuate around zero, which is desirable. However, the ACF plot shows a clear significant spike at lag 12. This indicates that some seasonal autocorrelation remains in the hydro residuals, meaning the VAR model has not fully captured the annual seasonal pattern. The histogram is roughly centered around zero but shows some extreme observations, suggesting occasional hydro shocks remain unexplained. Overall, the VAR captures part of the dynamics, but the residuals are not fully white noise.
+
+## Residual diagnostics: fill-rate equation
+
+```{r}
+fit_var %>%
+  select(aicc) %>%
+  residuals() %>%
+  gg_tsdisplay(fill_rate_sdiff, plot_type = "hist")
+```
+
+The residual diagnostics for the fill-rate equation show that the residuals fluctuate around zero, which is generally desirable. However, the ACF plot shows a clear significant spike at lag 12. This indicates that some annual seasonal autocorrelation remains in the residuals. The histogram is roughly centered around zero but has relatively wide tails, suggesting that some larger reservoir shocks remain unexplained. Overall, the VAR captures part of the fill-rate dynamics, but the residuals are not fully white noise.
 
 ## ARIMAX
 ```{r ARIMAX_fill_rate}
@@ -1049,9 +1091,7 @@ accuracy(fc_arimax_fill_rate, reservoir_fill_rate) %>%
     caption = "Forecast accuracy of ARIMAX fill rate candidate models"
   )
 
-# ==============================================================================
 # 3. Residual diagnostics for the selected ARIMAX model
-# ==============================================================================
 
 fit_arimax_fill_rate %>%
   select(ARIMAX_Auto) %>%
