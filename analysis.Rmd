@@ -786,7 +786,7 @@ The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] mod
 
 # Improving forecasting with reservoir fill data
 
-## ARIMAX Modelling: Fill Rate
+## Modelling The Fill Rate
 
 
 ```{r Load data}
@@ -889,22 +889,25 @@ ccf(ccf_data$fill_rate_pct, ccf_data$TWh,
 ccf_diff_data <- reservoir_fill_rate %>%
   as_tibble() %>%
   mutate(
-    TWh_sdiff       = difference(TWh,           lag = 12),
+    TWh_sdiff = difference(TWh, lag = 12),
     fill_rate_sdiff = difference(fill_rate_pct, lag = 12)
   ) %>%
   filter(!is.na(TWh_sdiff), !is.na(fill_rate_sdiff))
 
 # CCF on differenced series
-ccf(ccf_diff_data$fill_rate_sdiff, ccf_diff_data$TWh_sdiff,
-    lag.max = 12,
-    main = "CCF: Fill Rate vs Hydro Generation (seasonally differenced)")
+ccf(
+  ccf_diff_data$fill_rate_sdiff,
+  ccf_diff_data$TWh_sdiff,
+  lag.max = 12,
+  main = "CCF: Fill Rate vs Hydro Generation (seasonally differenced)"
+)
 
 # Confirm stationarity after differencing
 cat("=== ADF: Hydro (seasonally differenced) ===\n")
-adf.test(granger_data$TWh_sdiff)
+adf.test(ccf_diff_data$TWh_sdiff)
 
 cat("\n=== ADF: Fill Rate (seasonally differenced) ===\n")
-adf.test(granger_data$fill_rate_sdiff)
+adf.test(ccf_diff_data$fill_rate_sdiff)
 ```
 The CCF on the seasonally differenced series reveals a strong positive cross-correlation at lag 0 (~0.70) and lag 1 (~0.65), both well above the significance bounds. This confirms two things: fill rate and hydro generation move together contemporaneously, and last month's fill rate remains a strong predictor of current generation even after accounting for seasonality. The lag-1 specification used in the ARIMAX model is therefore empirically justified — it captures the most informative predictive signal available from the regressor while avoiding simultaneity between the dependent variable and the regressor at the same time period.
 
