@@ -1160,6 +1160,50 @@ fc_common_fill_rate %>%
   theme(legend.position = "bottom")
 ```
 
+
+
+## Comparing ARIMAX and VAR
+
+```{r arimax-var-comparison}
+# Plot 1 — ARIMAX vs Airline benchmark (levels scale)
+bind_rows(
+  fc_common_fill_rate %>%
+    mutate(.model = recode(.model,
+      "ARIMAX_Auto" = "ARIMAX (Fill Rate lag 1)"
+    )),
+  fc %>%
+    filter(.model == "Airline_SARIMA") %>%
+    mutate(.model = "Airline SARIMA(0,1,1)(0,1,1)[12]")
+) %>%
+  autoplot(
+    reservoir_fill_rate %>% filter(Month >= yearmonth("2020 Jan")),
+    level = 80
+  ) +
+  labs(
+    title    = "24-Month Forecast: ARIMAX vs Airline Benchmark",
+    subtitle = "Reservoir fill rate as exogenous regressor",
+    y        = "TWh", x = NULL
+  ) +
+  theme(legend.position = "bottom") +
+  guides(colour = guide_legend(nrow = 2, byrow = TRUE),
+         fill   = guide_legend(nrow = 2, byrow = TRUE))
+
+# Plot 2 — VAR on differenced scale (cannot be combined with levels models)
+fit_var[["aicc"]] %>%
+  forecast(h = 24) %>%
+  filter(.response == "TWh_sdiff") %>%
+  autoplot(
+    var_tsibble %>% filter(Month >= yearmonth("2020 Jan")),
+    level = 80
+  ) +
+  labs(
+    title    = "24-Month Forecast: VAR(AICc) — Hydro Equation",
+    subtitle = "Seasonally differenced scale",
+    y        = "Differenced TWh", x = NULL
+  ) +
+  theme(legend.position = "bottom")
+
+```
 ------------------------------------------------------------------------
 
 # Appendix — Save Processed Data
