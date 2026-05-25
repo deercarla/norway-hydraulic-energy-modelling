@@ -124,7 +124,7 @@ date is parsed correctly.
 # ──────────────────────────────────────────────────────────────────────────────
 
 # 1. Load data
-raw_inflow <- read_csv("data/NVE_ReservoirInflow_1958-2026_GWh.csv",
+raw_inflow <- read_csv("NVE_ReservoirInflow_1958-2026_GWh.csv",
                        show_col_types = FALSE)
 
 # Inspect
@@ -428,17 +428,17 @@ glimpse(reservoir)
 
 
 # EDA 2
-```{r}
+```{r waffle}
 # ══════════════════════════════════════════════════════════════════════════════
-# WAFFLE CHART: Norway's electricity generation mix — annual, 1993–2025
-# Adapted from R Graph Gallery tutorial (Guillaume Noblet)
+# WAFFLE CHART: Norway's electricity generation mix — 5-year periods, 1996–2026
 # Source data: electricity tsibble (SSB table 14091)
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── 1. Prepare data ───────────────────────────────────────────────────────────
 
-# Define sources and colours
-# Norway's mix is almost entirely hydro — colours reflect Norwegian energy identity
+start_year    <- 1996          # all bin boundaries shift with this
+last_data_year <- 2026         # last year in the data (partial)
+
 energy_sources <- c(
   "Hydro"   = "1.1",
   "Wind"    = "1.2",
@@ -447,41 +447,37 @@ energy_sources <- c(
 )
 
 energy_colours <- c(
-  "Hydro"   = "#3A7DC9",   # deep blue — water
-  "Wind"    = "#A8D5E2",   # light blue — air
-  "Solar"   = "#F8D564",   # yellow — sun
-  "Thermal" = "#C0856A"    # warm brown — combustion
+  "Hydro"   = "#3A7DC9",
+  "Wind"    = "#A8D5E2",
+  "Solar"   = "#F8D564",
+  "Thermal" = "#C0856A"
 )
 
-# Aggregate to annual GWh per source
-# NA treated as 0 (wind and solar not reported in early years = truly zero)
 waffle_data <- electricity %>%
   as_tibble() %>%
   filter(
     category_code %in% energy_sources,
-    lubridate::year(as.Date(year_month)) >= 2009   # start from 2009
+    lubridate::year(as.Date(year_month)) >= start_year    # tied to start_year
   ) %>%
   mutate(
-    year   = lubridate::year(as.Date(year_month)),
-    source = names(energy_sources)[match(category_code, energy_sources)],
-    source = factor(source, levels = names(energy_sources))
+    year         = lubridate::year(as.Date(year_month)),
+    period_start = start_year + ((year - start_year) %/% 5) * 5,
+    source       = names(energy_sources)[match(category_code, energy_sources)],
+    source       = factor(source, levels = names(energy_sources))
   ) %>%
-  group_by(year, source) %>%
+  group_by(period_start, source) %>%
   summarise(
     annual_GWh = sum(value_GWh, na.rm = TRUE),
     .groups    = "drop"
   )
 
-# Compute percentage of each source within each year
 waffle_data <- waffle_data %>%
-  group_by(year) %>%
+  group_by(period_start) %>%
   mutate(perc = (annual_GWh / sum(annual_GWh)) * 100) %>%
   ungroup()
 
-# Round to integers — simple rounding may not sum to exactly 100
-# Apply correction to the largest category (same logic as tutorial)
 waffle_data <- waffle_data %>%
-  group_by(year) %>%
+  group_by(period_start) %>%
   mutate(
     perc_int = as.integer(round(perc)),
     perc_int = {
@@ -489,64 +485,74 @@ waffle_data <- waffle_data %>%
       if (diff != 0L) perc_int[which.max(annual_GWh)] <-
         perc_int[which.max(annual_GWh)] + diff
       perc_int
-    }
+    },
+    # cap the bin's end year at the last year of data so labels are accurate
+    period_end = pmin(period_start + 4, last_data_year),
+    period_chr = ifelse(
+      period_start == period_end    # single-year partial bin → "2026*"
+      paste0(period_start, "*"),
+      paste0(period_start, "\u2013", substr(as.character(period_end), 3, 4))
+    ),
+    period_chr = factor(period_chr, levels = unique(period_chr[order(period_start)]))
   ) %>%
-  filter(perc_int > 0) %>%    # drop source-years with 0 squares (Solar pre-2010)
+  filter(perc_int > 0) %>%
   ungroup()
 
-# ── 2. Build subtitle with colour-coded source labels ────────────────────────
+# ── 2. Build subtitle ─────────────────────────────────────────────────────────
 subtitle_text <- glue::glue(
   "<span style='color:{energy_colours['Hydro']};'><strong>Hydro</strong></span>
   has dominated Norwegian electricity generation since records began.
   <span style='color:{energy_colours['Wind']};'><strong>Wind</strong></span>
-  began entering the mix in the 2000s and has grown steadily,
+  began entering the mix in the 2000s and has grown steadily, accounting for almost
+  10% of electricity production in the last 5 years,
   while <span style='color:{energy_colours['Thermal']};'><strong>thermal</strong></span>
   and <span style='color:{energy_colours['Solar']};'><strong>solar</strong></span>
-  remain marginal. Each square represents 1% of annual generation."
+  remain marginal. Each square represents 1% of generation."
 )
 
 # ── 3. Plot ───────────────────────────────────────────────────────────────────
-# n_rows = 10 → each waffle is 10 × 10 squares (compact, manageable for 33 years)
-# flip = TRUE → squares fill vertically (bottom to top)
+body_font  <- "sans"
+title_font <- "sans"
+
 g <- ggplot(waffle_data, aes(fill = source, values = perc_int)) +
   geom_waffle(
-    colour           = "white",
-    size             = 0.3,
-    n_rows           = 10,
-    flip             = TRUE,
+    colour            = "white",
+    size              = 0.3,
+    n_rows            = 10,
+    flip              = TRUE,
     make_proportional = FALSE
   ) +
   facet_wrap(
-    ~year,
+    ~period_chr,
     nrow           = 1,
     strip.position = "bottom"
   ) +
   scale_x_discrete() +
   scale_y_continuous(
-    labels = function(x) x * 10,    # each row = 10% (100 squares / 10 rows)
+    labels = function(x) x * 10,
     expand = c(0, 0)
   ) +
   scale_fill_manual(
     values = energy_colours,
-    breaks = names(energy_sources),
+    breaks = c("Hydro", "Wind", "Thermal"),
     name   = "Source",
     drop   = FALSE
   ) +
   theme_minimal(base_family = body_font) +
   labs(
-    title    = "Norway's Electricity Generation Mix (1993–2025)",
+    title    = "Norway's Electricity Generation Mix (1996–2026*)",
     subtitle = subtitle_text,
-    caption  = "Each square = 1% of total annual generation. Sources: SSB table 14091."
+    caption  = "Each square = 1% of generation within each 5-year period. Solar accounts for < 1% throughout and is omitted from the legend. *2026 covers January\u2013May only. Source: SSB (2026), table 14091."
   ) +
   theme(
     panel.grid      = element_blank(),
     axis.title      = element_blank(),
-    axis.text.x     = element_blank(),   # year shown in strip label below
+    axis.text.x     = element_blank(),
     axis.text.y     = element_blank(),
     strip.text      = element_text(
       family = body_font,
-      size   = 7,
-      angle  = 90,                       # rotate year labels — 33 years is tight
+      size   = 9,
+      angle  = 0,
       vjust  = 0.5
     ),
     legend.position = "bottom",
@@ -583,17 +589,16 @@ g <- ggplot(waffle_data, aes(fill = source, values = perc_int)) +
 
 g
 
-# ── 4. Save — wide aspect ratio essential for 33 annual columns ───────────────
+# ── 4. Save ───────────────────────────────────────────────────────────────────
 ggsave(
   "waffle_norway_electricity_mix.png",
   plot   = g,
-  width  = 24,     # wide to accommodate 33 years
-  height = 6,
+  width  = 12,
+  height = 5,
   dpi    = 300,
   bg     = "white"
 )
 ```
-
 
 ```{r eda 2}
 # ══════════════════════════════════════════════════════════════════════════════
