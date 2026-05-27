@@ -87,29 +87,8 @@ hydro <- long %>%
   mutate(TWh = TWh / 1e6) %>%
   as_tsibble(index = Month)
 
-wind <- long %>%
-  filter(grepl("Wind", series)) %>%
-  select(Month, TWh) %>%
-  mutate(TWh = TWh / 1e6) %>%
-  as_tsibble(index = Month)
-
-thermal <- long %>%
-  filter(grepl("Thermal", series)) %>%
-  select(Month, TWh) %>%
-  mutate(TWh = TWh / 1e6) %>%
-  as_tsibble(index = Month)
-
-solar <- long %>%
-  filter(grepl("Solar", series)) %>%
-  select(Month, TWh) %>%
-  mutate(TWh = TWh / 1e6) %>%
-  as_tsibble(index = Month)
-
 head(total_elec) %>% kable(align = "c", caption = "Total Electricity — first rows")
 head(hydro)       %>% kable(align = "c", caption = "Hydro — first rows")
-head(hydro)       %>% kable(align = "c", caption = "Wind — first rows")
-head(hydro)       %>% kable(align = "c", caption = "Thermal — first rows")
-head(hydro)       %>% kable(align = "c", caption = "Solar — first rows")
 
 summary(hydro$TWh)
 range(hydro$TWh)
@@ -119,12 +98,6 @@ has_gaps(total_elec)
 scan_gaps(total_elec)
 has_gaps(hydro)
 scan_gaps(hydro)
-has_gaps(wind)
-scan_gaps(wind)
-has_gaps(thermal)
-scan_gaps(thermal)
-has_gaps(solar)
-scan_gaps(solar)
 ```
 
 --------------------------------------------------------------------------------
@@ -257,105 +230,6 @@ share %>%
 Norway's electricity grid has transitioned from near-total hydro dependence toward a more diversified mix of renewable energy sources (thermal, wind and solar). This shift is punctuated by two discrete structural breaks rather than a gradual decline. 
 
 The share of hydro power generation has declined from an average of 99.1% between 1993–2008 to an average of 90.4% in 2019–2026 – a near 9 percentage points drop.
-
-
-## Other Sources as a Share of Total Generation
-
-```{r alt-import}
-long <- raw_electricity %>%
-  filter(category_label %in% c(
-    "Total electricity generation",
-    "Hydro power generation",
-    "Wind power generation",
-    "Thermal power generation",
-    "Solar power generation"
-  )) %>%
-  mutate(
-    year_part = as.integer(substr(month_str, 1, 4)),
-    mon_part  = as.integer(substr(month_str, 6, 7)),
-    Month     = yearmonth(make_date(year_part, mon_part, 1)),
-    TWh       = value_MWh / 1e6,
-    source    = recode(category_label,
-      "Total electricity generation" = "Total",
-      "Hydro power generation"       = "Hydro",
-      "Wind power generation"        = "Wind",
-      "Thermal power generation"     = "Thermal",
-      "Solar power generation"       = "Solar"
-    )
-  ) %>%
-  filter(!is.na(Month)) %>%
-  select(source, Month, TWh)
-  
-wind <- long %>%
-  filter(source == "Wind") %>%
-  select(Month, TWh) %>%
-  as_tsibble(index = Month)
-
-thermal <- long %>%
-  filter(source == "Thermal") %>%
-  select(Month, TWh) %>%
-  as_tsibble(index = Month)
-
-solar <- long %>%
-  filter(source == "Solar") %>%
-  select(Month, TWh) %>%
-  as_tsibble(index = Month)
-
-head(total_elec) %>% kable(align = "c", caption = "Total Electricity — first rows")
-head(hydro)       %>% kable(align = "c", caption = "Hydro — first rows")
-head(hydro)       %>% kable(align = "c", caption = "Wind — first rows")
-head(hydro)       %>% kable(align = "c", caption = "Thermal — first rows")
-head(hydro)       %>% kable(align = "c", caption = "Solar — first rows")
-
-summary(hydro$TWh)
-range(hydro$TWh)
-range(hydro$Month)
-
-has_gaps(total_elec)
-scan_gaps(total_elec)
-has_gaps(hydro)
-scan_gaps(hydro)
-has_gaps(wind)
-scan_gaps(wind)
-has_gaps(thermal)
-scan_gaps(thermal)
-has_gaps(solar)
-scan_gaps(solar)
-```
-
-```{r other-sources-share}
-# Join data
-others_share <- inner_join(
-  total_elec %>% rename(total = TWh),
-  wind       %>% rename(wind    = TWh),
-  by = "Month"
-) %>%
-  inner_join(thermal %>% rename(thermal = TWh), by = "Month") %>%
-  inner_join(solar   %>% rename(solar   = TWh), by = "Month") %>%
-  mutate(
-    wind_share    = wind    / total * 100,
-    thermal_share = thermal / total * 100,
-    solar_share   = solar   / total * 100
-  )
-
-# Pivot to long format for autoplot
-others_share %>%
-  pivot_longer(cols = c(wind_share, thermal_share, solar_share),
-               names_to  = "source",
-               values_to = "share") %>%
-  mutate(source = recode(source,
-    "wind_share"    = "Wind",
-    "thermal_share" = "Thermal",
-    "solar_share"   = "Solar"
-  )) %>%
-  as_tsibble(index = Month, key = source) %>%
-  autoplot(share) +
-  labs(title    = "Non-Hydro Sources as % of Total Electricity Generation — Norway",
-       subtitle = "January 1993 – March 2026",
-       y        = "Share (%)", x = NULL,
-       colour   = "Source")
-```
-
 
 ## Seasonal Plots
 
