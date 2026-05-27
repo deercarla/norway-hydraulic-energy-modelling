@@ -573,7 +573,7 @@ We estimate four competing models:
 1.  **Auto-ARIMA** — Hyndman-Khandakar algorithm selects the best ARIMA by AICc. Result: **ARIMA(3,0,0)(1,1,0)[12]**, with σ² = 0.811, AICc = 993.69.
 2.  **Manual SARIMA(3,0,0)(1,1,0)[12]** — justified directly from the ACF/PACF above: AR(3) non-seasonal component (PACF cuts off at lag 3), SAR(1) seasonal component (single PACF spike at lag 12), one seasonal difference (D=1). This converges to the **same specification as auto-ARIMA**, confirming that the visual identification is consistent with the data-driven search.
 3.  **Airline SARIMA(0,1,1)(0,1,1)[12]** — the classical Box-Jenkins benchmark for monthly seasonal data (Box & Jenkins, 1976). Applies both a regular and a seasonal difference (d=1, D=1), with MA(1) terms at the non-seasonal and seasonal levels. Result: σ² = 0.628 — notably lower than the ARIMA(3,0,0)(1,1,0) — AICc = 923.10, the best among all ARIMA models.
-4.  **ETS(M,A,A)** — exponential smoothing with multiplicative errors, additive trend, and additive seasonality. Smoothing parameters: α = 0.906 (very high, weighting recent observations heavily), β ≈ 0 (near-constant trend), γ ≈ 0 (near-fixed seasonal pattern). These near-zero β and γ values confirm the visual finding from the subseries plots: the trend and seasonal shape are stable over time.
+4.  **ETS(M,N,A)** — exponential smoothing with multiplicative errors, additive trend, and additive seasonality. Smoothing parameters: α = 0.906 (very high, weighting recent observations heavily), β ≈ 0 (near-constant trend), γ ≈ 0 (near-fixed seasonal pattern). These near-zero β and γ values confirm the visual finding from the subseries plots: the trend and seasonal shape are stable over time.
 
 ```{r estimation}
 # --- 1. Manual SARIMA(3,0,0)(1,1,0)[12] ---
@@ -635,7 +635,7 @@ bind_rows(
 |----------------------------------------------|-------------------|
 | Airline SARIMA(0,1,1)(0,1,1)[12]             | **923.10** ✓ best |
 | Auto-ARIMA / Manual SARIMA(3,0,0)(1,1,0)[12] | 993.69            |
-| ETS(M,A,A)                                   | 2122.42           |
+| ETS(M,N,A)                                   | 2122.42           |
 
 The Airline model is preferred by a margin of **\~70 AICc points** over the ARIMA(3,0,0)(1,1,0)[12] specifications. This large gap is meaningful: it reflects the fact that applying a regular difference (d=1) in the Airline model more fully removes the remaining level drift that the SAR(1) term in the ARIMA(3,0,0) was only partially capturing. By differencing, the Airline model requires only 2 parameters (ma1 = −0.146, sma1 = −0.978) to achieve a lower residual variance (σ² = 0.628 vs 0.811), illustrating the principle of parsimony — fewer parameters, better fit.
 
@@ -677,7 +677,7 @@ augment(fit_ets) %>%
 |----|----|----|----|
 | Manual SARIMA(3,0,0)(1,1,0)[12] | 76.37 | \< 0.001 | **FAIL** — identical to auto-ARIMA |
 | Airline SARIMA(0,1,1)(0,1,1)[12] | 46.35 | 0.0018 | **FAIL** — still significant, but notably lower statistic |
-| ETS(M,A,A) | 40.29 | 0.0199 | **FAIL** — marginally significant |
+| ETS(M,N,A) | 40.29 | 0.0199 | **FAIL** — marginally significant |
 
 None of the models fully pass the Ljung-Box test at lag 24, which means all leave some residual autocorrelation unexplained. However, the ranking is informative: the Airline model has the lowest lb_stat (46.35 vs 76.37 for the AR models), suggesting it captures seasonal dynamics more completely. The remaining structure likely reflects irregular weather-driven shocks (drought years) that no linear ARIMA model can absorb. For forecasting purposes, this is expected and acceptable — the residuals of all models appear close to white noise visually, with spikes concentrated at specific lags rather than systematic patterns.
 
@@ -716,7 +716,7 @@ fc %>%
     "Airline_SARIMA" = "Airline SARIMA(0,1,1)(0,1,1)[12]",
     "Auto_ARIMA"     = "Auto-ARIMA(3,0,0)(1,1,0)[12]",
     "Manual_SARIMA"  = "Manual SARIMA(3,0,0)(1,1,0)[12]",
-    "ETS"            = "ETS(M,A,A)"
+    "ETS"            = "ETS(M,N,A)"
   )) %>%
   autoplot(hydro, level = 80) +
   labs(title = "24-Month Forecast: Hydro Power Generation — All Models",
@@ -731,7 +731,7 @@ fc %>%
     "Airline_SARIMA" = "Airline SARIMA(0,1,1)(0,1,1)[12]",
     "Auto_ARIMA"     = "Auto-ARIMA(3,0,0)(1,1,0)[12]",
     "Manual_SARIMA"  = "Manual SARIMA(3,0,0)(1,1,0)[12]",
-    "ETS"            = "ETS(M,A,A)"
+    "ETS"            = "ETS(M,N,A)"
   )) %>%
   autoplot(
     hydro %>% filter(Month >= yearmonth("2020 Jan")),
@@ -761,7 +761,7 @@ accuracy(fc, hydro) %>%
 | Model                                | MAE       | RMSE      | MAPE      | MASE      |
 |--------------------------------------|-----------|-----------|-----------|-----------|
 | **Airline SARIMA(0,1,1)(0,1,1)[12]** | **0.618** | **0.838** | **5.107** | **0.474** |
-| ETS(M,A,A)                           | 0.650     | 0.911     | 5.585     | 0.499     |
+| ETS(M,N,A)                           | 0.650     | 0.911     | 5.585     | 0.499     |
 | Manual SARIMA(3,0,0)(1,1,0)[12]      | 1.037     | 1.275     | 8.399     | 0.796     |
 
 **Why did the Airline model win?**
@@ -774,7 +774,7 @@ The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] mod
 
 3.  **Parsimony pays off.** The Airline model uses only 2 parameters (ma1, sma1) versus 4 in the AR models (ar1, ar2, ar3, sar1). With 390 training observations this is not an overfitting concern per se, but the lower parameter count means the model is less sensitive to the specific AR dynamics of the training period that may not replicate perfectly in the test window.
 
-**Why did ETS come second?** ETS(M,A,A) with α = 0.906 is essentially a very short-memory model that heavily discounts past observations in favour of the most recent level. This makes it resilient to level changes. Its MASE of 0.499 is close to the Airline model, suggesting that for this series, rapid adaptation to the current level matters more than precisely modelling the autoregressive dynamics.
+**Why did ETS come second?** ETS(M,N,A) with α = 0.906 is essentially a very short-memory model that heavily discounts past observations in favour of the most recent level. This makes it resilient to level changes. Its MASE of 0.499 is close to the Airline model, suggesting that for this series, rapid adaptation to the current level matters more than precisely modelling the autoregressive dynamics.
 
 **All MASE values are below 1**, confirming that every model outperforms the naïve seasonal benchmark (repeat last year's value). The winning Airline model achieves a MAPE of 5.1%, meaning forecasts are on average 5.1% off — a reasonable result for a 24-month horizon on a weather-dependent series.
 
