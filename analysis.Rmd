@@ -1164,32 +1164,21 @@ fc_common_fill_rate %>%
 
 ## Comparing ARIMAX and VAR
 
-```{r arimax-var-comparison}
-# Plot 1 — ARIMAX vs Airline benchmark (levels scale)
-bind_rows(
-  fc_common_fill_rate %>%
-    mutate(.model = recode(.model,
-      "ARIMAX_Auto" = "ARIMAX (Fill Rate lag 1)"
-    )),
-  fc %>%
-    filter(.model == "Airline_SARIMA") %>%
-    mutate(.model = "Airline SARIMA(0,1,1)(0,1,1)[12]")
-) %>%
-  autoplot(
-    reservoir_fill_rate %>% filter(Month >= yearmonth("2020 Jan")),
-    level = 80
-  ) +
-  labs(
-    title    = "24-Month Forecast: ARIMAX vs Airline Benchmark",
-    subtitle = "Reservoir fill rate as exogenous regressor",
-    y        = "TWh", x = NULL
-  ) +
-  theme(legend.position = "bottom") +
-  guides(colour = guide_legend(nrow = 2, byrow = TRUE),
-         fill   = guide_legend(nrow = 2, byrow = TRUE))
+## Comparing ARIMAX and VAR
 
-# Plot 2 — VAR on differenced scale
-fc_var <- fit_var %>%
+```{r arimax-var-combined, message=FALSE, warning=FALSE}
+
+# === Step 1: Refit VAR on training data only ===
+train_end <- max(train_arimax_fill_rate$Month)
+
+var_train <- var_tsibble %>%
+  filter(Month <= train_end)
+
+fit_var_train <- var_train %>%
+  model(aicc = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff)))
+
+# === Step 2: Forecast 24 months ahead ===
+fc_var <- fit_var_train %>%
   forecast(h = 24)
 
 fc_var_tidy <- fc_var %>%
@@ -1199,22 +1188,56 @@ fc_var_tidy <- fc_var %>%
     fill_rate_sdiff_mean = .mean[, 2]
   )
 
-fc_var_tidy %>%
-  ggplot(aes(x = Month, y = TWh_sdiff_mean)) +
-  geom_line(colour = "#2166ac") +
+# === Step 3: Anchor — last 12 actual TWh before train_end, shifted forward 12 months ===
+# Anchor: 24 months immediately before the forecast period starts
+last_actual <- reservoir_fill_rate %>%
+  as_tibble() %>%
+  arrange(Month) %>%
+  filter(Month > train_end - 24, Month <= train_end) %>%
+  select(Month, TWh) %>%
+  mutate(Month = Month + 24)  # shift forward 24 to align with forecast months
+
+cat("VAR forecast months:\n"); print(fc_var_tidy %>% filter(.model == "aicc") %>% pull(Month))
+cat("Anchor months:\n"); print(last_actual$Month)
+
+# === Step 4: Invert seasonal difference ===
+fc_var_levels <- fc_var_tidy %>%
+  filter(.model == "aicc") %>%
+  left_join(last_actual, by = "Month") %>%
+  mutate(TWh_forecast = TWh_sdiff_mean + TWh)
+
+cat("NAs in TWh_forecast:", sum(is.na(fc_var_levels$TWh_forecast)), "\n")
+
+# === Step 5: Rebuild ARIMAX forecast ===
+fc_common_fill_rate <- fit_arimax_fill_rate %>%
+  forecast(new_data = test_arimax_fill_rate)
+
+# === Step 6: Plot ===
+fc_common_fill_rate %>%
+  mutate(.model = recode(.model,
+    "ARIMAX_Auto" = "ARIMAX (Fill Rate lag 1)"
+  )) %>%
+  autoplot(
+    reservoir_fill_rate %>%
+      filter(Month >= yearmonth("2020 Jan")),
+    level = 80
+  ) +
   geom_line(
-    data = var_tsibble %>%
-      dplyr::filter(Month >= yearmonth("2020 Jan")),
-    aes(x = Month, y = TWh_sdiff),
-    colour = "black"
+    data = fc_var_levels,
+    aes(x = Month, y = TWh_forecast, colour = "VAR(AICc)"),
+    linewidth = 1.2, linetype = "dashed"
   ) +
+  scale_colour_manual(values = c("VAR(AICc)" = "#d73027")) +
   labs(
-    title    = "24-Month Forecast: VAR(AICc) — Hydro Equation (2020 onwards)",
-    subtitle = "Seasonally differenced scale",
-    y        = "Differenced TWh",
-    x        = NULL
+    title    = "24-Month Forecast: ARIMAX and VAR",
+    subtitle = "VAR de-differenced to levels scale — point forecast only, no intervals",
+    y        = "TWh", x = NULL,
+    colour   = NULL
   ) +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") +
+  guides(colour = guide_legend(nrow = 2, byrow = TRUE),
+         fill   = guide_legend(nrow = 2, byrow = TRUE))
+
 ```
 ------------------------------------------------------------------------
 
