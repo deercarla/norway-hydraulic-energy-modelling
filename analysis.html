@@ -2466,10 +2466,9 @@ among all ARIMA models.</li>
 <li><strong>ETS(M,N,A)</strong> — exponential smoothing with
 multiplicative errors, additive trend, and additive seasonality.
 Smoothing parameters: α = 0.906 (very high, weighting recent
-observations heavily), β ≈ 0 (near-constant trend), γ ≈ 0 (near-fixed
-seasonal pattern). These near-zero β and γ values confirm the visual
-finding from the subseries plots: the trend and seasonal shape are
-stable over time.</li>
+observations heavily), β = 0 (no trend), γ ≈ 0 (near-fixed seasonal
+pattern). These values confirm the visual finding from the subseries
+plots: the trend and seasonal shape are stable over time.</li>
 </ol>
 <pre class="r"><code># --- 1. Manual SARIMA(3,0,0)(1,1,0)[12] ---
 # Justification:

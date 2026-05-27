@@ -573,7 +573,7 @@ We estimate four competing models:
 1.  **Auto-ARIMA** — Hyndman-Khandakar algorithm selects the best ARIMA by AICc. Result: **ARIMA(3,0,0)(1,1,0)[12]**, with σ² = 0.811, AICc = 993.69.
 2.  **Manual SARIMA(3,0,0)(1,1,0)[12]** — justified directly from the ACF/PACF above: AR(3) non-seasonal component (PACF cuts off at lag 3), SAR(1) seasonal component (single PACF spike at lag 12), one seasonal difference (D=1). This converges to the **same specification as auto-ARIMA**, confirming that the visual identification is consistent with the data-driven search.
 3.  **Airline SARIMA(0,1,1)(0,1,1)[12]** — the classical Box-Jenkins benchmark for monthly seasonal data (Box & Jenkins, 1976). Applies both a regular and a seasonal difference (d=1, D=1), with MA(1) terms at the non-seasonal and seasonal levels. Result: σ² = 0.628 — notably lower than the ARIMA(3,0,0)(1,1,0) — AICc = 923.10, the best among all ARIMA models.
-4.  **ETS(M,N,A)** — exponential smoothing with multiplicative errors, additive trend, and additive seasonality. Smoothing parameters: α = 0.906 (very high, weighting recent observations heavily), β ≈ 0 (near-constant trend), γ ≈ 0 (near-fixed seasonal pattern). These near-zero β and γ values confirm the visual finding from the subseries plots: the trend and seasonal shape are stable over time.
+4.  **ETS(M,N,A)** — exponential smoothing with multiplicative errors, additive trend, and additive seasonality. Smoothing parameters: α = 0.906 (very high, weighting recent observations heavily), β = 0 (no trend), γ ≈ 0 (near-fixed seasonal pattern). These values confirm the visual finding from the subseries plots: the trend and seasonal shape are stable over time.
 
 ```{r estimation}
 # --- 1. Manual SARIMA(3,0,0)(1,1,0)[12] ---
