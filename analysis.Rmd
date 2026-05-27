@@ -1188,21 +1188,33 @@ bind_rows(
   guides(colour = guide_legend(nrow = 2, byrow = TRUE),
          fill   = guide_legend(nrow = 2, byrow = TRUE))
 
-# Plot 2 — VAR on differenced scale (cannot be combined with levels models)
-fit_var[["aicc"]] %>%
-  forecast(h = 24) %>%
-  filter(.response == "TWh_sdiff") %>%
-  autoplot(
-    var_tsibble %>% filter(Month >= yearmonth("2020 Jan")),
-    level = 80
+# Plot 2 — VAR on differenced scale
+fc_var <- fit_var %>%
+  forecast(h = 24)
+
+fc_var_tidy <- fc_var %>%
+  as_tibble() %>%
+  mutate(
+    TWh_sdiff_mean       = .mean[, 1],
+    fill_rate_sdiff_mean = .mean[, 2]
+  )
+
+fc_var_tidy %>%
+  ggplot(aes(x = Month, y = TWh_sdiff_mean)) +
+  geom_line(colour = "#2166ac") +
+  geom_line(
+    data = var_tsibble %>%
+      dplyr::filter(Month >= yearmonth("2020 Jan")),
+    aes(x = Month, y = TWh_sdiff),
+    colour = "black"
   ) +
   labs(
-    title    = "24-Month Forecast: VAR(AICc) — Hydro Equation",
+    title    = "24-Month Forecast: VAR(AICc) — Hydro Equation (2020 onwards)",
     subtitle = "Seasonally differenced scale",
-    y        = "Differenced TWh", x = NULL
+    y        = "Differenced TWh",
+    x        = NULL
   ) +
   theme(legend.position = "bottom")
-
 ```
 ------------------------------------------------------------------------
 
