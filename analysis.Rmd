@@ -1,7 +1,14 @@
 ---
 title: "Norwegian Hydro Power Generation — Forecasting Analysis"
-author: "Carla de Erausquin"
-date: "`r Sys.Date()`"
+
+author:
+  - "Carla de Erausquin (185899)"
+  - "Christoph Schilling (185939)"
+  - "Florencia Brazionis (175974)"
+  - "José Miguel Gomes Queirós Lobo (185920)"
+
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+
 output:
   html_document:
     toc: true
@@ -27,7 +34,7 @@ library(lubridate)
 library(lmtest)
 ```
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Load and Prepare the Data
 
@@ -80,20 +87,47 @@ hydro <- long %>%
   mutate(TWh = TWh / 1e6) %>%
   as_tsibble(index = Month)
 
+wind <- long %>%
+  filter(grepl("Wind", series)) %>%
+  select(Month, TWh) %>%
+  mutate(TWh = TWh / 1e6) %>%
+  as_tsibble(index = Month)
+
+thermal <- long %>%
+  filter(grepl("Thermal", series)) %>%
+  select(Month, TWh) %>%
+  mutate(TWh = TWh / 1e6) %>%
+  as_tsibble(index = Month)
+
+solar <- long %>%
+  filter(grepl("Solar", series)) %>%
+  select(Month, TWh) %>%
+  mutate(TWh = TWh / 1e6) %>%
+  as_tsibble(index = Month)
+
 head(total_elec) %>% kable(align = "c", caption = "Total Electricity — first rows")
 head(hydro)       %>% kable(align = "c", caption = "Hydro — first rows")
+head(hydro)       %>% kable(align = "c", caption = "Wind — first rows")
+head(hydro)       %>% kable(align = "c", caption = "Thermal — first rows")
+head(hydro)       %>% kable(align = "c", caption = "Solar — first rows")
 
 summary(hydro$TWh)
 range(hydro$TWh)
 range(hydro$Month)
 
-has_gaps(hydro)
-scan_gaps(hydro)
 has_gaps(total_elec)
 scan_gaps(total_elec)
+has_gaps(hydro)
+scan_gaps(hydro)
+has_gaps(wind)
+scan_gaps(wind)
+has_gaps(thermal)
+scan_gaps(thermal)
+has_gaps(solar)
+scan_gaps(solar)
 ```
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Preliminary Visual Analysis
 
@@ -103,13 +137,15 @@ scan_gaps(total_elec)
 total_elec %>%
   autoplot(TWh) +
   labs(title    = "Total Electricity Generation in Norway",
-       subtitle = "Jan 1993 – March 2026",
+       subtitle = "January 1993 – March 2026",
+       caption  = "Source: Statistics Norway (2026)",
        y = "TWh", x = NULL)
 
 hydro %>%
   autoplot(TWh) +
   labs(title    = "Hydro Power Generation in Norway",
-       subtitle = "Jan 1993 – March 2026",
+       subtitle = "January 1993 – March 2026",
+       caption  = "Source: Statistics Norway (2026)",
        y = "TWh", x = NULL)
 
 long %>%
@@ -117,19 +153,20 @@ long %>%
   as_tsibble(index = Month, key = series) %>%
   autoplot(TWh) +
   labs(title = "Norway: Total vs Hydro Electricity Generation",
+       subtitle = "January 1993 – March 2026",
+       caption  = "Source: Statistics Norway (2026)",
        y = "TWh", x = NULL) +
   theme(legend.position = "bottom")
 ```
-
 **What do we see?**
-
-- Strong seasonal pattern in both series (high in winter, low in summer).
+- Mild upward trend over the full period: generation in the 1993–2000 range oscillates mostly between 7–13 TWh, while post-2015 peaks regularly reach 15–18 TWh. 
+- Strong, regular annual seasonality: winter peaks and summer troughs. 
 - Hydro tracks Total very closely, confirming hydro dominates Norwegian electricity generation (\~90–95%).
-- No strong long-run trend; production fluctuates around a relatively stable level with some multi-year cycles.
 
 ## Hydro as a Share of Total Generation
 
 ```{r hydro-share}
+# Join data
 share <- inner_join(
   total_elec %>% rename(total = TWh),
   hydro       %>% rename(hydro  = TWh),
@@ -137,19 +174,188 @@ share <- inner_join(
 ) %>%
   mutate(hydro_share = hydro / total * 100)
 
+# Define break points
+break1 <- yearmonth("2009 Jan")
+break2 <- yearmonth("2019 Jan")
+
+# Compute period means
+period_means <- share %>%
+  as_tibble() %>%
+  mutate(period = case_when(
+    Month < break1 ~ "1993–2008",
+    Month < break2 ~ "2009–2018",
+    TRUE           ~ "2019–2026"
+  )) %>%
+  group_by(period) %>%
+  summarise(
+    mean_share = mean(hydro_share),
+    x_start    = min(Month),
+    x_end      = max(Month),
+    .groups = "drop"
+  )
+
+# Period mean colours
+period_colours <- c(
+  "1993–2008" = "#2166ac",
+  "2009–2018" = "#f4a261",
+  "2019–2026" = "#e63946"
+)
+
+# Plot
 share %>%
   autoplot(hydro_share) +
-  labs(title = "Hydro as % of Total Electricity Generation — Norway",
-       y = "Share (%)", x = NULL) +
-  geom_hline(yintercept = mean(share$hydro_share),
-             linetype = "dashed", colour = "steelblue") +
-  annotate("text", x = min(share$Month),
-           y = mean(share$hydro_share) + 0.5,
-           label = paste0("Mean: ", round(mean(share$hydro_share), 1), "%"),
-           hjust = 0, colour = "steelblue")
+
+  # --- Vertical structural break lines ---
+  geom_vline(xintercept = as.Date(break1),
+           linetype = "dotted", colour = "grey40", linewidth = 0.6) +
+  geom_vline(xintercept = as.Date(break2),
+           linetype = "dotted", colour = "grey40", linewidth = 0.6) +
+
+  # --- Break labels ---
+  annotate("text", x = as.Date(break1), y = 86,
+         label = "Regime change 1\n (~2009)",
+         hjust = -0.05, vjust = 0, size = 3, colour = "grey30") +
+  annotate("text", x = as.Date(break2), y = 86,
+         label = "Regime change 2\n (~2019)",
+         hjust = -0.05, vjust = 0, size = 3, colour = "grey30") +
+
+  # --- Period mean segments ---
+  geom_segment(
+    data = period_means,
+    aes(x = x_start, xend = x_end,
+        y = mean_share, yend = mean_share,
+        colour = period),
+    linetype = "dashed", linewidth = 0.7,
+    inherit.aes = FALSE
+  ) +
+
+  # --- Period mean labels ---
+  geom_label(
+    data = period_means,
+    aes(x = x_end, y = mean_share,
+        label = paste0(period, "\nmean: ", round(mean_share, 1), "%"),
+        colour = period),
+    hjust = 1.05, vjust = -0.2, size = 2.8,
+    label.size = NA, fill = "white", inherit.aes = FALSE
+  ) +
+  coord_cartesian(ylim = c(NA, 100.2)) +
+
+  # --- Y-axis truncation note ---
+  labs(
+    title    = "Hydro as % of Total Electricity Generation — Norway",
+    subtitle = "January 1993 – March 2026",
+    y        = "Share (%)",
+    x        = NULL,
+    caption  = "Source: Statistics Norway (2026)\nNote: Y-axis truncated to show variation.",
+    colour   = "Period"
+  ) +
+
+  scale_colour_manual(values = period_colours) +
+  theme(legend.position = "none")
+```
+**Description:** 
+Norway's electricity grid has transitioned from near-total hydro dependence toward a more diversified mix of renewable energy sources (thermal, wind and solar). This shift is punctuated by two discrete structural breaks rather than a gradual decline. 
+
+The share of hydro power generation has declined from an average of 99.1% between 1993–2008 to an average of 90.4% in 2019–2026 – a near 9 percentage points drop.
+
+
+## Other Sources as a Share of Total Generation
+
+```{r alt-import}
+long <- raw_electricity %>%
+  filter(category_label %in% c(
+    "Total electricity generation",
+    "Hydro power generation",
+    "Wind power generation",
+    "Thermal power generation",
+    "Solar power generation"
+  )) %>%
+  mutate(
+    year_part = as.integer(substr(month_str, 1, 4)),
+    mon_part  = as.integer(substr(month_str, 6, 7)),
+    Month     = yearmonth(make_date(year_part, mon_part, 1)),
+    TWh       = value_MWh / 1e6,
+    source    = recode(category_label,
+      "Total electricity generation" = "Total",
+      "Hydro power generation"       = "Hydro",
+      "Wind power generation"        = "Wind",
+      "Thermal power generation"     = "Thermal",
+      "Solar power generation"       = "Solar"
+    )
+  ) %>%
+  filter(!is.na(Month)) %>%
+  select(source, Month, TWh)
+  
+wind <- long %>%
+  filter(source == "Wind") %>%
+  select(Month, TWh) %>%
+  as_tsibble(index = Month)
+
+thermal <- long %>%
+  filter(source == "Thermal") %>%
+  select(Month, TWh) %>%
+  as_tsibble(index = Month)
+
+solar <- long %>%
+  filter(source == "Solar") %>%
+  select(Month, TWh) %>%
+  as_tsibble(index = Month)
+
+head(total_elec) %>% kable(align = "c", caption = "Total Electricity — first rows")
+head(hydro)       %>% kable(align = "c", caption = "Hydro — first rows")
+head(hydro)       %>% kable(align = "c", caption = "Wind — first rows")
+head(hydro)       %>% kable(align = "c", caption = "Thermal — first rows")
+head(hydro)       %>% kable(align = "c", caption = "Solar — first rows")
+
+summary(hydro$TWh)
+range(hydro$TWh)
+range(hydro$Month)
+
+has_gaps(total_elec)
+scan_gaps(total_elec)
+has_gaps(hydro)
+scan_gaps(hydro)
+has_gaps(wind)
+scan_gaps(wind)
+has_gaps(thermal)
+scan_gaps(thermal)
+has_gaps(solar)
+scan_gaps(solar)
 ```
 
-Norway's hydro share hovers around **90–95%** on average, with dips in dry years when thermal/wind backup is needed.
+```{r other-sources-share}
+# Join data
+others_share <- inner_join(
+  total_elec %>% rename(total = TWh),
+  wind       %>% rename(wind    = TWh),
+  by = "Month"
+) %>%
+  inner_join(thermal %>% rename(thermal = TWh), by = "Month") %>%
+  inner_join(solar   %>% rename(solar   = TWh), by = "Month") %>%
+  mutate(
+    wind_share    = wind    / total * 100,
+    thermal_share = thermal / total * 100,
+    solar_share   = solar   / total * 100
+  )
+
+# Pivot to long format for autoplot
+others_share %>%
+  pivot_longer(cols = c(wind_share, thermal_share, solar_share),
+               names_to  = "source",
+               values_to = "share") %>%
+  mutate(source = recode(source,
+    "wind_share"    = "Wind",
+    "thermal_share" = "Thermal",
+    "solar_share"   = "Solar"
+  )) %>%
+  as_tsibble(index = Month, key = source) %>%
+  autoplot(share) +
+  labs(title    = "Non-Hydro Sources as % of Total Electricity Generation — Norway",
+       subtitle = "January 1993 – March 2026",
+       y        = "Share (%)", x = NULL,
+       colour   = "Source")
+```
+
 
 ## Seasonal Plots
 
@@ -211,7 +417,7 @@ hydro %>%
        y = "TWh", x = NULL)
 ```
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Transformation
 
@@ -245,7 +451,7 @@ hydro %>%
 
 The log scale stabilises the variance slightly and will be used for the STL decomposition and model estimation.
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Decomposition
 
@@ -299,7 +505,7 @@ hydro_stl %>%
 
 A Ljung-Box test applied to the STL remainder (lag = 24) yields X² = 261.72 (p \< 0.001), decisively rejecting white noise. This indicates that systematic variation remains after trend and seasonal extraction, consistent with the influence of inter-annual precipitation variability — motivating the inclusion of precipitation as an exogenous regressor in the ARIMAX specification.
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Stationarity Tests
 
@@ -353,7 +559,7 @@ kpss.test(na.omit(hydro$diff_TWh))
 
 After first differencing the conflict is resolved, confirming the differenced series is stationary and suitable for ARIMA modelling.
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Structural Break Analysis
 
@@ -488,7 +694,7 @@ hydro %>%
        y = "TWh", x = "Month")
 ```
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Model Identification — ACF & PACF
 
@@ -564,7 +770,7 @@ plot(qlr_diff, main = "Sup-F Test: Searching for Breakpoint (Differenced Series)
 lines(breakpoints(qlr_diff))
 ```
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Estimation
 
@@ -573,7 +779,7 @@ We estimate four competing models:
 1.  **Auto-ARIMA** — Hyndman-Khandakar algorithm selects the best ARIMA by AICc. Result: **ARIMA(3,0,0)(1,1,0)[12]**, with σ² = 0.811, AICc = 993.69.
 2.  **Manual SARIMA(3,0,0)(1,1,0)[12]** — justified directly from the ACF/PACF above: AR(3) non-seasonal component (PACF cuts off at lag 3), SAR(1) seasonal component (single PACF spike at lag 12), one seasonal difference (D=1). This converges to the **same specification as auto-ARIMA**, confirming that the visual identification is consistent with the data-driven search.
 3.  **Airline SARIMA(0,1,1)(0,1,1)[12]** — the classical Box-Jenkins benchmark for monthly seasonal data (Box & Jenkins, 1976). Applies both a regular and a seasonal difference (d=1, D=1), with MA(1) terms at the non-seasonal and seasonal levels. Result: σ² = 0.628 — notably lower than the ARIMA(3,0,0)(1,1,0) — AICc = 923.10, the best among all ARIMA models.
-4.  **ETS(M,A,A)** — exponential smoothing with multiplicative errors, additive trend, and additive seasonality. Smoothing parameters: α = 0.906 (very high, weighting recent observations heavily), β ≈ 0 (near-constant trend), γ ≈ 0 (near-fixed seasonal pattern). These near-zero β and γ values confirm the visual finding from the subseries plots: the trend and seasonal shape are stable over time.
+4.  **ETS(M,N,A)** — exponential smoothing with multiplicative errors, no trend component, and additive seasonality. Smoothing parameters: α = 0.959 (very high, weighting recent observations almost entirely on the most recent level) and γ ≈ 0 (near-fixed seasonal pattern). There is no β parameter because the model contains no trend term. The near-zero γ confirms the visual finding from the subseries plots: the seasonal shape is stable over time and requires almost no updating each period.
 
 ```{r estimation}
 # --- 1. Manual SARIMA(3,0,0)(1,1,0)[12] ---
@@ -621,7 +827,7 @@ report(fit_ets)
 bind_rows(
   glance(fit_arima_manual)   %>% mutate(Model = "Manual SARIMA 300-110-12"),
   glance(fit_sarima_airline) %>% mutate(Model = "Airline SARIMA 011-011-12"),
-  glance(fit_ets)            %>% mutate(Model = "ETS MAA")
+  glance(fit_ets)            %>% mutate(Model = "ETS(M,N,A)")
 ) %>%
   select(Model, AIC, AICc, BIC) %>%
   arrange(AICc) %>%
@@ -635,13 +841,13 @@ bind_rows(
 |----------------------------------------------|-------------------|
 | Airline SARIMA(0,1,1)(0,1,1)[12]             | **923.10** ✓ best |
 | Auto-ARIMA / Manual SARIMA(3,0,0)(1,1,0)[12] | 993.69            |
-| ETS(M,A,A)                                   | 2122.42           |
+| ETS(M,N,A)                                   | 2122.42           |
 
 The Airline model is preferred by a margin of **\~70 AICc points** over the ARIMA(3,0,0)(1,1,0)[12] specifications. This large gap is meaningful: it reflects the fact that applying a regular difference (d=1) in the Airline model more fully removes the remaining level drift that the SAR(1) term in the ARIMA(3,0,0) was only partially capturing. By differencing, the Airline model requires only 2 parameters (ma1 = −0.146, sma1 = −0.978) to achieve a lower residual variance (σ² = 0.628 vs 0.811), illustrating the principle of parsimony — fewer parameters, better fit.
 
 Note: ETS AICc cannot be directly compared to ARIMA AICc as they use different likelihood frameworks.
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Diagnostic Checks
 
@@ -664,7 +870,7 @@ augment(fit_sarima_airline) %>%
 
 fit_ets %>%
   gg_tsresiduals() +
-  labs(title = "Residual Diagnostics: ETS")
+  labs(title = "Residual Diagnostics: ETS(M,N,A)")
 
 augment(fit_ets) %>%
   features(.innov, ljung_box, lag = 24, dof = 0) %>%
@@ -677,11 +883,11 @@ augment(fit_ets) %>%
 |----|----|----|----|
 | Manual SARIMA(3,0,0)(1,1,0)[12] | 76.37 | \< 0.001 | **FAIL** — identical to auto-ARIMA |
 | Airline SARIMA(0,1,1)(0,1,1)[12] | 46.35 | 0.0018 | **FAIL** — still significant, but notably lower statistic |
-| ETS(M,A,A) | 40.29 | 0.0199 | **FAIL** — marginally significant |
+| ETS(M,N,A) | 40.29 | 0.0199 | **FAIL** — marginally significant |
 
 None of the models fully pass the Ljung-Box test at lag 24, which means all leave some residual autocorrelation unexplained. However, the ranking is informative: the Airline model has the lowest lb_stat (46.35 vs 76.37 for the AR models), suggesting it captures seasonal dynamics more completely. The remaining structure likely reflects irregular weather-driven shocks (drought years) that no linear ARIMA model can absorb. For forecasting purposes, this is expected and acceptable — the residuals of all models appear close to white noise visually, with spikes concentrated at specific lags rather than systematic patterns.
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Forecast
 
@@ -716,7 +922,7 @@ fc %>%
     "Airline_SARIMA" = "Airline SARIMA(0,1,1)(0,1,1)[12]",
     "Auto_ARIMA"     = "Auto-ARIMA(3,0,0)(1,1,0)[12]",
     "Manual_SARIMA"  = "Manual SARIMA(3,0,0)(1,1,0)[12]",
-    "ETS"            = "ETS(M,A,A)"
+    "ETS"            = "ETS(M,N,A)"
   )) %>%
   autoplot(hydro, level = 80) +
   labs(title = "24-Month Forecast: Hydro Power Generation — All Models",
@@ -731,7 +937,7 @@ fc %>%
     "Airline_SARIMA" = "Airline SARIMA(0,1,1)(0,1,1)[12]",
     "Auto_ARIMA"     = "Auto-ARIMA(3,0,0)(1,1,0)[12]",
     "Manual_SARIMA"  = "Manual SARIMA(3,0,0)(1,1,0)[12]",
-    "ETS"            = "ETS(M,A,A)"
+    "ETS"            = "ETS(M,N,A)"
   )) %>%
   autoplot(
     hydro %>% filter(Month >= yearmonth("2020 Jan")),
@@ -760,23 +966,23 @@ accuracy(fc, hydro) %>%
 
 | Model                                | MAE       | RMSE      | MAPE      | MASE      |
 |--------------------------------------|-----------|-----------|-----------|-----------|
-| **Airline SARIMA(0,1,1)(0,1,1)[12]** | **0.618** | **0.838** | **5.107** | **0.474** |
-| ETS(M,A,A)                           | 0.650     | 0.911     | 5.585     | 0.499     |
-| Manual SARIMA(3,0,0)(1,1,0)[12]      | 1.037     | 1.275     | 8.399     | 0.796     |
+| **Airline SARIMA(0,1,1)(0,1,1)[12]** | **0.622** | **0.845** | **5.155** | **0.485** |
+| ETS(M,N,A)                           | 0.634     | 0.852     | 5.257     | 0.493     |
+| Manual SARIMA(3,0,0)(1,1,0)[12]      | 1.039     | 1.278     | 8.418     | 0.809     |
 
 **Why did the Airline model win?**
 
-The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] models on every metric, with a MASE of 0.474 compared to 0.759–0.796 — roughly 37% lower forecast error. There are three interconnected reasons for this:
+The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] models on every metric, with a MASE of 0.485 compared to 0.809 — roughly 40% lower forecast error. There are three interconnected reasons for this:
 
 1.  **Double differencing handles drift better.** The ARIMA(3,0,0)(1,1,0)[12] uses a SAR(1) term to model the seasonal pattern, which imposes a fixed autoregressive structure on the seasonal dynamics. The Airline model instead differences at both the regular (d=1) and seasonal (D=1) level before fitting, which more aggressively removes any slow drift in either the level or the seasonal pattern. Over a 24-month forecast horizon, small drifts compound — the Airline model's pre-differencing approach adapts better to gradual shifts that occurred in the test period (April 2024 – March 2026).
 
-2.  **The sma1 coefficient = −0.978 is near the boundary of −1**, which in practice means the seasonal MA term is acting almost like an additional seasonal difference. This is a known empirical pattern for hydro and energy data where the seasonal pattern itself evolves slowly — the model is essentially self-correcting every year.
+2.  **The sma1 coefficient = −0.953 is near the boundary of −1**, which in practice means the seasonal MA term is acting almost like an additional seasonal difference. This is a known empirical pattern for hydro and energy data where the seasonal pattern itself evolves slowly — the model is essentially self-correcting every year.
 
 3.  **Parsimony pays off.** The Airline model uses only 2 parameters (ma1, sma1) versus 4 in the AR models (ar1, ar2, ar3, sar1). With 390 training observations this is not an overfitting concern per se, but the lower parameter count means the model is less sensitive to the specific AR dynamics of the training period that may not replicate perfectly in the test window.
 
-**Why did ETS come second?** ETS(M,A,A) with α = 0.906 is essentially a very short-memory model that heavily discounts past observations in favour of the most recent level. This makes it resilient to level changes. Its MASE of 0.499 is close to the Airline model, suggesting that for this series, rapid adaptation to the current level matters more than precisely modelling the autoregressive dynamics.
+**Why did ETS come second?** ETS(M,N,A) with α = 0.959 is essentially a very short-memory model that discounts past observations heavily in favour of the most recent level, with no explicit trend component. This makes it highly adaptive to level shifts without being misled by directional drift. Its MASE of 0.493 is close to the Airline model, suggesting that for this series, rapid adaptation to the current level matters more than precisely modelling the autoregressive dynamics.
 
-**All MASE values are below 1**, confirming that every model outperforms the naïve seasonal benchmark (repeat last year's value). The winning Airline model achieves a MAPE of 5.1%, meaning forecasts are on average 5.1% off — a reasonable result for a 24-month horizon on a weather-dependent series.
+**All MASE values are below 1**, confirming that every model outperforms the naïve seasonal benchmark (repeat last year's value). The winning Airline model achieves a MAPE of 5.16%, meaning forecasts are on average 5.16% off — a reasonable result for a 24-month horizon on a weather-dependent series.
 
 ------------------------------------------------------------------------
 
@@ -1202,7 +1408,6 @@ fit_var[["aicc"]] %>%
     y        = "Differenced TWh", x = NULL
   ) +
   theme(legend.position = "bottom")
-
 ```
 ------------------------------------------------------------------------
 
