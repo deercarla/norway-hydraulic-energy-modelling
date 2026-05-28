@@ -18,20 +18,20 @@ Norwegian hydro power generation is characterised by strong, stable annual seaso
 
 | Model | RMSE | MAE | MAPE | MASE |
 |---|---|---|---|---|
-| ETS(M,N,A) | 0.841 | 0.608 | 4.97% | **0.464** |
-| Airline SARIMA(0,1,1)(0,1,1)[12] | 0.841 | 0.615 | 5.08% | 0.469 |
+| Airline SARIMA(0,1,1)(0,1,1)[12] | 0.845 | 0.622 | 5.16% | **0.485** |
+| ETS(M,N,A) | 0.852 | 0.634 | 5.26% | 0.493 |
 | ARIMAX (fill rate lag 1) | 0.841 | 0.656 | 5.51% | 0.500 |
 | VAR(5) | 0.898 | 0.692 | 5.91% | 0.528 |
-| Manual SARIMA(3,0,0)(1,1,0)[12] | 1.276 | 1.038 | 8.41% | 0.791 |
+| Manual SARIMA(3,0,0)(1,1,0)[12] | 1.278 | 1.039 | 8.42% | 0.809 |
 
-All MASE values are below 1, indicating every model outperforms the naïve seasonal benchmark. The **ETS(M,N,A)** model achieved the best out-of-sample performance, closely followed by the Airline SARIMA. Despite substantially better in-sample fit (AICc 739.65 vs 835.43), the ARIMAX model ranked third out-of-sample, consistent with overfitting in the automatic ARIMA error structure.
+All MASE values are below 1, indicating every model outperforms the naïve seasonal benchmark. The **Airline SARIMA(0,1,1)(0,1,1)[12]** model achieved the best out-of-sample performance, closely followed by ETS(M,N,A). Despite substantially better in-sample fit (AICc 739.65 vs 946.63), the ARIMAX model ranked third out-of-sample, consistent with overfitting in the automatic ARIMA error structure.
 
 ## Models
 
 | Model | Type | Notes |
 |---|---|---|
 | Manual SARIMA(3,0,0)(1,1,0)[12] | Univariate | Manually identified via Box-Jenkins ACF/PACF inspection |
-| Airline SARIMA(0,1,1)(0,1,1)[12] | Univariate | Classical benchmark; best AICc among ARIMA specs (923.10) |
+| Airline SARIMA(0,1,1)(0,1,1)[12] | Univariate | Classical benchmark; best AICc among ARIMA specs (946.63) |
 | ETS(M,N,A) | Univariate | Auto-selected; multiplicative errors, no trend, additive seasonality |
 | ARIMAX(1,0,1)(1,1,2)[12] | Exogenous regressor | Lagged reservoir fill rate (NVE); fill rate coefficient β̂ = 0.087 (p < 0.001) |
 | VAR(5) | Multivariate | Jointly models hydro generation and reservoir fill rate; Granger causality confirmed (F = 86.27, p < 0.001) |
@@ -88,7 +88,7 @@ renv::restore()
 
 ## Notes
 
-- The analysis uses a **train/test split** with training data prior to April 2024 and a 24-month test set (April 2024 – March 2026).
+- The analysis uses a **train/test split** with training data through March 2024 and a 24-month test set (April 2024 – March 2026).
 - Model selection uses AIC/AICc/BIC on the training set; out-of-sample accuracy is evaluated using RMSE, MAE, MAPE, and MASE.
 - Residual diagnostics are included for all models. Some residual autocorrelation persists across all specifications, attributed to irregular hydrological shocks (drought years) that linear time series models cannot fully absorb.
 - The ARIMAX model uses a **one-month lag** on reservoir fill rate to avoid simultaneity bias.
