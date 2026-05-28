@@ -1,7 +1,14 @@
 ---
 title: "Norwegian Hydro Power Generation — Forecasting Analysis"
-author: "Carla de Erausquin"
-date: "`r Sys.Date()`"
+
+author:
+  - "Carla de Erausquin (185899)"
+  - "Christoph Schilling (185939)"
+  - "Florencia Cecilia Brazionis (175974)"
+  - "José Miguel Gomes Queirós Lobo (185920)"
+
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+
 output:
   html_document:
     toc: true
@@ -27,7 +34,7 @@ library(lubridate)
 library(lmtest)
 ```
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Load and Prepare the Data
 
@@ -87,13 +94,13 @@ summary(hydro$TWh)
 range(hydro$TWh)
 range(hydro$Month)
 
-has_gaps(hydro)
-scan_gaps(hydro)
 has_gaps(total_elec)
 scan_gaps(total_elec)
+has_gaps(hydro)
+scan_gaps(hydro)
 ```
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Preliminary Visual Analysis
 
@@ -103,13 +110,15 @@ scan_gaps(total_elec)
 total_elec %>%
   autoplot(TWh) +
   labs(title    = "Total Electricity Generation in Norway",
-       subtitle = "Jan 1993 – March 2026",
+       subtitle = "January 1993 – March 2026",
+       caption  = "Source: Statistics Norway (2026)",
        y = "TWh", x = NULL)
 
 hydro %>%
   autoplot(TWh) +
   labs(title    = "Hydro Power Generation in Norway",
-       subtitle = "Jan 1993 – March 2026",
+       subtitle = "January 1993 – March 2026",
+       caption  = "Source: Statistics Norway (2026)",
        y = "TWh", x = NULL)
 
 long %>%
@@ -117,19 +126,20 @@ long %>%
   as_tsibble(index = Month, key = series) %>%
   autoplot(TWh) +
   labs(title = "Norway: Total vs Hydro Electricity Generation",
+       subtitle = "January 1993 – March 2026",
+       caption  = "Source: Statistics Norway (2026)",
        y = "TWh", x = NULL) +
   theme(legend.position = "bottom")
 ```
-
 **What do we see?**
-
-- Strong seasonal pattern in both series (high in winter, low in summer).
+- Mild upward trend over the full period: generation in the 1993–2000 range oscillates mostly between 7–13 TWh, while post-2015 peaks regularly reach 15–18 TWh. 
+- Strong, regular annual seasonality: winter peaks and summer troughs. 
 - Hydro tracks Total very closely, confirming hydro dominates Norwegian electricity generation (\~90–95%).
-- No strong long-run trend; production fluctuates around a relatively stable level with some multi-year cycles.
 
 ## Hydro as a Share of Total Generation
 
 ```{r hydro-share}
+# Join data
 share <- inner_join(
   total_elec %>% rename(total = TWh),
   hydro       %>% rename(hydro  = TWh),
@@ -137,33 +147,111 @@ share <- inner_join(
 ) %>%
   mutate(hydro_share = hydro / total * 100)
 
+# Define break points
+break1 <- yearmonth("2009 Jan")
+break2 <- yearmonth("2019 Jan")
+
+# Compute period means
+period_means <- share %>%
+  as_tibble() %>%
+  mutate(period = case_when(
+    Month < break1 ~ "1993–2008",
+    Month < break2 ~ "2009–2018",
+    TRUE           ~ "2019–2026"
+  )) %>%
+  group_by(period) %>%
+  summarise(
+    mean_share = mean(hydro_share),
+    x_start    = min(Month),
+    x_end      = max(Month),
+    .groups = "drop"
+  )
+
+# Period mean colours
+period_colours <- c(
+  "1993–2008" = "#2166ac",
+  "2009–2018" = "#f4a261",
+  "2019–2026" = "#e63946"
+)
+
+# Plot
 share %>%
   autoplot(hydro_share) +
-  labs(title = "Hydro as % of Total Electricity Generation — Norway",
-       y = "Share (%)", x = NULL) +
-  geom_hline(yintercept = mean(share$hydro_share),
-             linetype = "dashed", colour = "steelblue") +
-  annotate("text", x = min(share$Month),
-           y = mean(share$hydro_share) + 0.5,
-           label = paste0("Mean: ", round(mean(share$hydro_share), 1), "%"),
-           hjust = 0, colour = "steelblue")
-```
 
-Norway's hydro share hovers around **90–95%** on average, with dips in dry years when thermal/wind backup is needed.
+  # --- Vertical structural break lines ---
+  geom_vline(xintercept = as.Date(break1),
+           linetype = "dotted", colour = "grey40", linewidth = 0.6) +
+  geom_vline(xintercept = as.Date(break2),
+           linetype = "dotted", colour = "grey40", linewidth = 0.6) +
+
+  # --- Break labels ---
+  annotate("text", x = as.Date(break1), y = 86,
+         label = "Regime change 1\n (~2009)",
+         hjust = -0.05, vjust = 0, size = 3, colour = "grey30") +
+  annotate("text", x = as.Date(break2), y = 86,
+         label = "Regime change 2\n (~2019)",
+         hjust = -0.05, vjust = 0, size = 3, colour = "grey30") +
+
+  # --- Period mean segments ---
+  geom_segment(
+    data = period_means,
+    aes(x = x_start, xend = x_end,
+        y = mean_share, yend = mean_share,
+        colour = period),
+    linetype = "dashed", linewidth = 0.7,
+    inherit.aes = FALSE
+  ) +
+
+  # --- Period mean labels ---
+  geom_label(
+    data = period_means,
+    aes(x = x_end, y = mean_share,
+        label = paste0(period, "\nmean: ", round(mean_share, 1), "%"),
+        colour = period),
+    hjust = 1.05, vjust = -0.2, size = 2.8,
+    label.size = NA, fill = "white", inherit.aes = FALSE
+  ) +
+  coord_cartesian(ylim = c(NA, 100.2)) +
+
+  # --- Y-axis truncation note ---
+  labs(
+    title    = "Hydro as % of Total Electricity Generation — Norway",
+    subtitle = "January 1993 – March 2026",
+    y        = "Share (%)",
+    x        = NULL,
+    caption  = "Source: Statistics Norway (2026)\nNote: Y-axis truncated to show variation.",
+    colour   = "Period"
+  ) +
+
+  scale_colour_manual(values = period_colours) +
+  theme(legend.position = "none")
+```
+**Description:** 
+Norway's electricity grid has transitioned from near-total hydro dependence toward a more diversified mix of renewable energy sources (thermal, wind and solar). This shift is punctuated by two discrete structural breaks rather than a gradual decline. 
+
+The share of hydro power generation has declined from an average of 99.1% between 1993–2008 to an average of 90.4% in 2019–2026 – a near 9 percentage points drop.
 
 ## Seasonal Plots
 
 ```{r seasonal-plots}
 total_elec %>%
   gg_season(TWh, labels = "both") +
-  labs(title = "Seasonal Plot: Total Electricity Generation", y = "TWh")
+  labs(
+    title = "Seasonal Plot: Total Electricity Generation",
+    y = "TWh",
+    caption  = "Source: Statistics Norway (2026)"
+  )
 
 hydro %>%
   gg_season(TWh, labels = "both") +
-  labs(title = "Seasonal Plot: Hydro Power Generation", y = "TWh")
+  labs(
+    title = "Seasonal Plot: Hydro Power Generation",
+    y = "TWh",
+    caption  = "Source: Statistics Norway (2026)"
+  )
 ```
-
-- Generation is highest in **January/December** and lowest in **June/July**.
+**Description:** 
+- Generation is highest in **December–February** and lowest in **June–August**.
 - The shape is consistent across years, confirming stable seasonality.
 - Some years (dry years) show notably lower summer generation.
 
@@ -172,18 +260,26 @@ hydro %>%
 ```{r subseries-plots}
 total_elec %>%
   gg_subseries(TWh) +
-  labs(title = "Subseries Plot: Total Electricity Generation", y = "TWh") +
+  labs(
+    title = "Subseries Plot: Total Electricity Generation",
+    y = "TWh",
+    caption  = "Source: Statistics Norway (2026)"  
+  ) +
   theme(plot.title = element_text(hjust = 0.5))
 
 hydro %>%
   gg_subseries(TWh) +
-  labs(title = "Subseries Plot: Hydro Power Generation", y = "TWh") +
+  labs(
+    title = "Subseries Plot: Hydro Power Generation",
+    y = "TWh",
+    caption  = "Source: Statistics Norway (2026)"  
+  ) +
   theme(plot.title = element_text(hjust = 0.5))
 ```
-
-- Blue horizontal lines (monthly means) are clearly higher in winter months, but stable over time.
-- Within-month trends are relatively flat, suggesting no strong long-term directional change.
-- Both series move together with consistent seasonality, but Hydro is more volatile.
+**Description:**
+- Blue horizontal lines (monthly means) confirm the seasonal pattern: winter months (Jan–Mar, Nov–Dec) average 12–14 TWh, while summer months (Jun–Aug) average 9–10 TWh.
+- Within-month trends show a mild upward drift in recent years, most visible in January and December, suggesting generation capacity has grown over time rather than remaining flat.
+- Both series are nearly identical in shape and scale, reflecting hydro's continued dominance — the main difference being slightly higher variance in Hydro, consistent with its exposure to precipitation and reservoir levels.
 
 ## Lag Plots
 
@@ -192,10 +288,10 @@ hydro %>%
   gg_lag(TWh, geom = "point", lags = 1:12) +
   labs(title = "Lag Plot: Hydro Power Generation")
 ```
-
-- Strong positive autocorrelation at lags 1–2.
+**Description:**
+- Strong positive autocorrelation at **lags 1–2**.
 - Strong positive correlation at **lag 12**, confirming annual seasonality.
-- Lag 6 shows weaker/negative correlation — the opposite season.
+- **Lag 6** shows weaker correlation — the opposite season.
 
 ## Annual Totals
 
@@ -207,17 +303,21 @@ hydro %>%
   summarise(Annual_TWh = sum(TWh, na.rm = TRUE), .groups = "drop") %>%
   ggplot(aes(x = Year, y = Annual_TWh)) +
   geom_col(fill = "steelblue") +
-  labs(title = "Annual Hydro Power Generation in Norway",
-       y = "TWh", x = NULL)
+  labs(
+    title = "Annual Hydro Power Generation in Norway",
+    y = "TWh", 
+    x = NULL,
+    caption  = "Source: Statistics Norway (2026)"  
+  )
 ```
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Transformation
 
 ## Box-Cox Check
 
-```{r boxcox}
+```{r box-cox}
 lambda <- hydro %>%
   features(TWh, features = guerrero)
 lambda
@@ -228,8 +328,8 @@ hydro %>%
                       round(lambda$lambda_guerrero, 3), ")"),
        y = "Transformed TWh")
 ```
-
-λ is close to 1, suggesting little transformation is strictly needed — the variance is already quite stable. However, we also consider a log transformation for interpretability.
+**Description:**
+λ ≈ 1.463 is close to 1, suggesting little transformation is strictly needed — the variance is already quite stable. However, we also consider a log transformation for interpretability.
 
 ## Log Transformation
 
@@ -242,10 +342,10 @@ hydro %>%
   labs(title = "Log-Transformed: Hydro Power Generation",
        y = "log(TWh)")
 ```
-
+**Description:**
 The log scale stabilises the variance slightly and will be used for the STL decomposition and model estimation.
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Decomposition
 
@@ -280,12 +380,10 @@ hydro_stl %>%
   labs(title = "STL Decomposition (log scale): Hydro Power Generation",
        subtitle = "log_TWh = trend + season_year + remainder")
 ```
-
 **Interpretation:**
-
 - The **trend** is non-linear and non-monotonic — rising toward 2010, dipping, then recovering — reflecting capacity changes and hydrological cycles.
-- The **seasonal** component is remarkably stable in amplitude (\~±0.15 log units) across the full 35-year span, confirming a consistent hydrological regime.
-- The **remainder** is small relative to the other components (the grey bar comparison confirms this), with a few large negative outliers (\~−0.25 to −0.30) likely corresponding to severe drought years.
+- The **seasonal** component is remarkably stable in amplitude (\≈±0.15 log units) across the full 35-year span, confirming a consistent hydrological regime.
+- The **remainder** is small relative to the other components (the grey bar comparison confirms this), with a few large negative outliers (\≈−0.25 to −0.30) likely corresponding to severe drought years.
 - Using `robust = TRUE` down-weights these outlier observations when estimating the trend, preventing them from distorting the decomposition.
 
 To verify the decomposition is adequate, the ACF of the remainder is inspected. Residual autocorrelation would suggest the trend or seasonal windows require adjustment.
@@ -296,10 +394,10 @@ hydro_stl %>%
   pull(remainder) %>%
   Box.test(lag = 24, type = "Ljung-Box")
 ```
+**Interpretation:**
+A Ljung-Box test applied to the STL remainder (lag = 24) yields X² = 261.72 (p \< 0.001), decisively rejecting white noise. This indicates that systematic variation remains after trend and seasonal extraction, consistent with the influence of inter-annual reservoir inflow and consequent fill rate variability — motivating the inclusion of reservoir fill rate as an exogenous regressor in the ARIMAX specification.
 
-A Ljung-Box test applied to the STL remainder (lag = 24) yields X² = 261.72 (p \< 0.001), decisively rejecting white noise. This indicates that systematic variation remains after trend and seasonal extraction, consistent with the influence of inter-annual precipitation variability — motivating the inclusion of precipitation as an exogenous regressor in the ARIMAX specification.
-
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Stationarity Tests
 
@@ -335,7 +433,7 @@ cat("\n=== Differences Needed ===\n")
 cat("Regular differences:  ", ndiff_hydro$ndiffs,  "\n")
 cat("Seasonal differences: ", nsdiff_hydro$nsdiffs, "\n")
 ```
-
+**Interpretation:**
 The ADF and KPSS tests produce **conflicting results**: ADF rejects non-stationarity (p = 0.01) while KPSS simultaneously rejects stationarity. This is best explained by the strong seasonal pattern — the series is not a random walk (hence ADF), but its persistent annual cycle creates seasonal non-stationarity (hence KPSS). The automatic differencing tests recommend applying **one regular difference and one seasonal difference**.
 
 ## First Differencing and Re-Testing
@@ -350,10 +448,10 @@ adf.test(na.omit(hydro$diff_TWh))
 cat("\n=== KPSS Test (first differences) ===\n")
 kpss.test(na.omit(hydro$diff_TWh))
 ```
-
+**Interpretation:**
 After first differencing the conflict is resolved, confirming the differenced series is stationary and suitable for ARIMA modelling.
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Structural Break Analysis
 
@@ -488,7 +586,7 @@ hydro %>%
        y = "TWh", x = "Month")
 ```
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Model Identification — ACF & PACF
 
@@ -503,10 +601,8 @@ hydro %>%
   gg_tsdisplay(TWh, plot_type = "partial", lag_max = 48) +
   labs(title = "ACF & PACF: Hydro Power Generation (raw)")
 ```
-
 **Reading the raw ACF/PACF:**
-
-The ACF of the raw series decays very slowly and shows large spikes at lags 12, 24, 36, and 48, with large negative spikes at lags 6, 18, and 30 (the opposite season). This slow, persistent decay is the hallmark of **seasonal non-stationarity** and tells us differencing is necessary before we can identify the model order. The PACF shows large direct effects at lag 1 and lag 12, but the remainder of the pattern is difficult to interpret until stationarity is achieved.
+The ACF of the raw series decays very slowly and shows large spikes at lags 12, 24, 36, and 48, with large negative spikes at lags 6, 18, and 30 (the opposite season). This slow, persistent decay is the hallmark of **seasonal non-stationarity** and tells us differencing is necessary before we can identify the model order. The PACF shows large direct effects at lag 1 and some residual seasonal structure at lag 12, but the remainder of the pattern is difficult to interpret until stationarity is achieved.
 
 ## After Seasonal Differencing (D=1) — The Key Identification Step
 
@@ -520,9 +616,7 @@ hydro %>%
   labs(title    = "ACF & PACF: Hydro — After Seasonal Differencing (D=1)",
        subtitle  = "This is the plot used to manually identify p, q, P, Q")
 ```
-
 **Reading the differenced ACF and PACF — manual parameter identification:**
-
 We follow the Box-Jenkins identification rules on the differenced series:
 
 | Plot | What we see | What it implies |
@@ -564,16 +658,15 @@ plot(qlr_diff, main = "Sup-F Test: Searching for Breakpoint (Differenced Series)
 lines(breakpoints(qlr_diff))
 ```
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Estimation
 
 We estimate four competing models:
-
 1.  **Auto-ARIMA** — Hyndman-Khandakar algorithm selects the best ARIMA by AICc. Result: **ARIMA(3,0,0)(1,1,0)[12]**, with σ² = 0.811, AICc = 993.69.
-2.  **Manual SARIMA(3,0,0)(1,1,0)[12]** — justified directly from the ACF/PACF above: AR(3) non-seasonal component (PACF cuts off at lag 3), SAR(1) seasonal component (single PACF spike at lag 12), one seasonal difference (D=1). This converges to the **same specification as auto-ARIMA**, confirming that the visual identification is consistent with the data-driven search.
-3.  **Airline SARIMA(0,1,1)(0,1,1)[12]** — the classical Box-Jenkins benchmark for monthly seasonal data (Box & Jenkins, 1976). Applies both a regular and a seasonal difference (d=1, D=1), with MA(1) terms at the non-seasonal and seasonal levels. Result: σ² = 0.628 — notably lower than the ARIMA(3,0,0)(1,1,0) — AICc = 923.10, the best among all ARIMA models.
-4.  **ETS(M,N,A)** — exponential smoothing with multiplicative errors, additive trend, and additive seasonality. Smoothing parameters: α = 0.906 (very high, weighting recent observations heavily), β = 0 (no trend), γ ≈ 0 (near-fixed seasonal pattern). These values confirm the visual finding from the subseries plots: the trend and seasonal shape are stable over time.
+2.  **Manual SARIMA(3,0,0)(1,1,0)[12]** — justified directly from the ACF/PACF above: AR(3) non-seasonal component (PACF cuts off at lag 3), SAR(1) seasonal component (single PACF spike at lag 12), one seasonal difference (D=1). This converges to the **same specification as auto-ARIMA**, confirming that the visual identification is consistent with the data-driven search (σ² = 0.7896, AICc = 1017.72).
+3.  **Airline SARIMA(0,1,1)(0,1,1)[12]** — the classical Box-Jenkins benchmark for monthly seasonal data (Box & Jenkins, 1976). Applies both a regular and a seasonal difference (d=1, D=1), with MA(1) terms at the non-seasonal and seasonal levels. Result: σ² = 0.6257 — notably lower than the ARIMA(3,0,0)(1,1,0) — AICc = 946.63, the best among all ARIMA models.
+4.  **ETS(M,N,A)** — exponential smoothing with multiplicative errors, no trend component, and additive seasonality. Smoothing parameters: α = 0.959 (very high, weighting recent observations almost entirely on the most recent level) and γ ≈ 0 (near-fixed seasonal pattern). There is no β parameter because the model contains no trend term. The near-zero γ confirms the visual finding from the subseries plots: the seasonal shape is stable over time and requires almost no updating each period.
 
 ```{r estimation}
 # --- 1. Manual SARIMA(3,0,0)(1,1,0)[12] ---
@@ -621,27 +714,25 @@ report(fit_ets)
 bind_rows(
   glance(fit_arima_manual)   %>% mutate(Model = "Manual SARIMA 300-110-12"),
   glance(fit_sarima_airline) %>% mutate(Model = "Airline SARIMA 011-011-12"),
-  glance(fit_ets)            %>% mutate(Model = "ETS MAA")
+  glance(fit_ets)            %>% mutate(Model = "ETS(M,N,A)")
 ) %>%
   select(Model, AIC, AICc, BIC) %>%
   arrange(AICc) %>%
   kable(digits = 2, align = "c",
         caption = "Information Criteria — Full Sample (lower is better)")
 ```
-
 **Information criteria results:**
-
 | Model                                        | AICc              |
 |----------------------------------------------|-------------------|
-| Airline SARIMA(0,1,1)(0,1,1)[12]             | **923.10** ✓ best |
-| Auto-ARIMA / Manual SARIMA(3,0,0)(1,1,0)[12] | 993.69            |
-| ETS(M,N,A)                                   | 2122.42           |
+| Airline SARIMA(0,1,1)(0,1,1)[12]             | **946.63** ✓ best |
+| Auto-ARIMA / Manual SARIMA(3,0,0)(1,1,0)[12] | 1017.72           |
+| ETS(M,N,A)                                   | 2200.40           |
 
-The Airline model is preferred by a margin of **\~70 AICc points** over the ARIMA(3,0,0)(1,1,0)[12] specifications. This large gap is meaningful: it reflects the fact that applying a regular difference (d=1) in the Airline model more fully removes the remaining level drift that the SAR(1) term in the ARIMA(3,0,0) was only partially capturing. By differencing, the Airline model requires only 2 parameters (ma1 = −0.146, sma1 = −0.978) to achieve a lower residual variance (σ² = 0.628 vs 0.811), illustrating the principle of parsimony — fewer parameters, better fit.
+The Airline model is preferred by a margin of **\~71 AICc points** over the ARIMA(3,0,0)(1,1,0)[12] specifications. This large gap is meaningful: it reflects the fact that applying a regular difference (d=1) in the Airline model more fully removes the remaining level drift that the SAR(1) term in the ARIMA(3,0,0) was only partially capturing. By differencing, the Airline model requires only 2 parameters (ma1 = −0.1432, sma1 = −0.9527) to achieve a lower residual variance (σ² = 0.6257 vs 0.7896), illustrating the principle of parsimony — fewer parameters, better fit.
 
 Note: ETS AICc cannot be directly compared to ARIMA AICc as they use different likelihood frameworks.
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Diagnostic Checks
 
@@ -664,24 +755,22 @@ augment(fit_sarima_airline) %>%
 
 fit_ets %>%
   gg_tsresiduals() +
-  labs(title = "Residual Diagnostics: ETS")
+  labs(title = "Residual Diagnostics: ETS(M,N,A)")
 
 augment(fit_ets) %>%
   features(.innov, ljung_box, lag = 24, dof = 0) %>%
   kable(digits = 4, caption = "Ljung-Box Test: ETS (lag=24)")
 ```
-
 **Ljung-Box results (H₀: no residual autocorrelation; p \> 0.05 = pass):**
-
 | Model | lb_stat | p-value | Verdict |
 |----|----|----|----|
-| Manual SARIMA(3,0,0)(1,1,0)[12] | 76.37 | \< 0.001 | **FAIL** — identical to auto-ARIMA |
-| Airline SARIMA(0,1,1)(0,1,1)[12] | 46.35 | 0.0018 | **FAIL** — still significant, but notably lower statistic |
-| ETS(M,N,A) | 40.29 | 0.0199 | **FAIL** — marginally significant |
+| Manual SARIMA(3,0,0)(1,1,0)[12] | 79.6255 | \< 0.001 | **FAIL** — identical to auto-ARIMA |
+| Airline SARIMA(0,1,1)(0,1,1)[12] | 48.3598 | 0.001 | **FAIL** — still significant, but notably lower statistic |
+| ETS(M,N,A) | 40.1614 | 0.0205 | **FAIL** — marginally significant |
 
-None of the models fully pass the Ljung-Box test at lag 24, which means all leave some residual autocorrelation unexplained. However, the ranking is informative: the Airline model has the lowest lb_stat (46.35 vs 76.37 for the AR models), suggesting it captures seasonal dynamics more completely. The remaining structure likely reflects irregular weather-driven shocks (drought years) that no linear ARIMA model can absorb. For forecasting purposes, this is expected and acceptable — the residuals of all models appear close to white noise visually, with spikes concentrated at specific lags rather than systematic patterns.
+None of the models fully pass the Ljung-Box test at lag 24, which means all leave some residual autocorrelation unexplained. However, the ranking is informative: the Airline model has the lowest lb_stat (48.3598 vs 79.6255 for the AR models), suggesting it captures seasonal dynamics more completely. The remaining structure likely reflects irregular weather-driven shocks (drought years) that no linear ARIMA model can absorb. For forecasting purposes, this is expected and acceptable — the residuals of all models appear close to white noise visually, with spikes concentrated at specific lags rather than systematic patterns.
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 # Forecast
 
@@ -755,41 +844,30 @@ accuracy(fc, hydro) %>%
   kable(digits = 3, align = "c",
         caption = "Forecast Accuracy — Test Set (last 24 months); ordered by MASE")
 ```
-
 **Results — out-of-sample accuracy on the last 24 months:**
-
 | Model                                | MAE       | RMSE      | MAPE      | MASE      |
 |--------------------------------------|-----------|-----------|-----------|-----------|
-| **Airline SARIMA(0,1,1)(0,1,1)[12]** | **0.618** | **0.838** | **5.107** | **0.474** |
-| ETS(M,N,A)                           | 0.650     | 0.911     | 5.585     | 0.499     |
-| Manual SARIMA(3,0,0)(1,1,0)[12]      | 1.037     | 1.275     | 8.399     | 0.796     |
+| **Airline SARIMA(0,1,1)(0,1,1)[12]** | **0.622** | **0.845** | **5.155** | **0.485** |
+| ETS(M,N,A)                           | 0.634     | 0.852     | 5.257     | 0.493     |
+| Manual SARIMA(3,0,0)(1,1,0)[12]      | 1.039     | 1.278     | 8.418     | 0.809     |
 
 **Why did the Airline model win?**
-
-The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] models on every metric, with a MASE of 0.474 compared to 0.759–0.796 — roughly 37% lower forecast error. There are three interconnected reasons for this:
-
+The Airline SARIMA(0,1,1)(0,1,1)[12] outperforms the ARIMA(3,0,0)(1,1,0)[12] models on every metric, with a MASE of 0.485 compared to 0.809 — roughly 40% lower forecast error. There are three interconnected reasons for this:
 1.  **Double differencing handles drift better.** The ARIMA(3,0,0)(1,1,0)[12] uses a SAR(1) term to model the seasonal pattern, which imposes a fixed autoregressive structure on the seasonal dynamics. The Airline model instead differences at both the regular (d=1) and seasonal (D=1) level before fitting, which more aggressively removes any slow drift in either the level or the seasonal pattern. Over a 24-month forecast horizon, small drifts compound — the Airline model's pre-differencing approach adapts better to gradual shifts that occurred in the test period (April 2024 – March 2026).
-
-2.  **The sma1 coefficient = −0.978 is near the boundary of −1**, which in practice means the seasonal MA term is acting almost like an additional seasonal difference. This is a known empirical pattern for hydro and energy data where the seasonal pattern itself evolves slowly — the model is essentially self-correcting every year.
-
+2.  **The sma1 coefficient = -0.9527 is near the boundary of −1**, which in practice means the seasonal MA term is acting almost like an additional seasonal difference. This is a known empirical pattern for hydro and energy data where the seasonal pattern itself evolves slowly — the model is essentially self-correcting every year.
 3.  **Parsimony pays off.** The Airline model uses only 2 parameters (ma1, sma1) versus 4 in the AR models (ar1, ar2, ar3, sar1). With 390 training observations this is not an overfitting concern per se, but the lower parameter count means the model is less sensitive to the specific AR dynamics of the training period that may not replicate perfectly in the test window.
 
-**Why did ETS come second?** ETS(M,N,A) with α = 0.906 is essentially a very short-memory model that heavily discounts past observations in favour of the most recent level. This makes it resilient to level changes. Its MASE of 0.499 is close to the Airline model, suggesting that for this series, rapid adaptation to the current level matters more than precisely modelling the autoregressive dynamics.
+**Why did ETS come second?** ETS(M,N,A) with α = 0.9586 is essentially a very short-memory model that discounts past observations heavily in favour of the most recent level, with no explicit trend component. This makes it highly adaptive to level shifts without being misled by directional drift. Its MASE of 0.493 is close to the Airline model, suggesting that for this series, rapid adaptation to the current level matters more than precisely modelling the autoregressive dynamics.
 
-**All MASE values are below 1**, confirming that every model outperforms the naïve seasonal benchmark (repeat last year's value). The winning Airline model achieves a MAPE of 5.1%, meaning forecasts are on average 5.1% off — a reasonable result for a 24-month horizon on a weather-dependent series.
+**All MASE values are below 1**, confirming that every model outperforms the naïve seasonal benchmark (repeat last year's value). The winning Airline model achieves a MAPE of 5.16%, meaning forecasts are on average 5.16% off — a reasonable result for a 24-month horizon on a weather-dependent series.
 
-------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
+# Improving Forecasting with Reservoir Fill Rate Data
 
+## Modelling the Fill Rate
 
-
-
-# Improving forecasting with reservoir fill data
-
-## Modelling The Fill Rate
-
-
-```{r Load data}
+```{r load-data-fill-rate}
 fill_rate_monthly <- read.csv("data/reservoir_fill_rate.csv")
 fill_rate_monthly <- fill_rate_monthly %>%
   mutate(Month = yearmonth(Month)) %>%
@@ -799,27 +877,44 @@ fill_rate_monthly <- fill_rate_monthly %>%
 ```{r EDA}
 fill_rate_monthly %>%
   autoplot(fill_rate_mean) +
-  labs(title = "Monthly Reservoir Fill Rate — Norway",
-       y = "Fill Rate", x = NULL)
+  labs(
+    title = "Monthly Reservoir Fill Rate — Norway",
+    y = "Fill Rate", 
+    x = NULL,
+    caption  = "Source: Noregs vassdrags- og energidirektorat (2026)"
+  )
 ```
 
-##seasonality check
-```{r seasonal plots}
+## Seasonality Check
+
+```{r seasonal-plots-fill-rate}
 fill_rate_monthly %>%
   gg_season(fill_rate_mean, labels = "both") +
-  labs(title = "Seasonal Plot: Reservoir Fill Rate",
-       y = "Fill Rate")
+  labs(
+    title = "Seasonal Plot: Reservoir Fill Rate",
+    y = "Fill Rate",
+    caption  = "Source: Noregs vassdrags- og energidirektorat (2026)"
+  )
 
 fill_rate_monthly %>%
   gg_subseries(fill_rate_mean) +
-  labs(title = "Subseries Plot: Reservoir Fill Rate",
-       y = "Fill Rate") +
+  labs(
+    title = "Subseries Plot: Reservoir Fill Rate",
+    y = "Fill Rate",
+    caption  = "Source: Noregs vassdrags- og energidirektorat (2026)"
+  ) +
   theme(plot.title = element_text(hjust = 0.5))
 ```
-The seasonal and subseries plots confirm the strong and stable annual cycle in Norwegian reservoir fill rates. As shown in the seasonal plot, reservoirs follow a consistent S-shaped pattern each year: draining through winter to a trough in March–April (typically 0.20–0.35), refilling rapidly through May–July driven by snowmelt, and reaching peak levels of 0.75–0.95 between August and October before the draw-down restarts. This shape is remarkably uniform across all 30 years — year-to-year variation manifests in the level rather than the shape, with dry years such as 2002 and 2010 visibly below the rest and wet years like 2020 reaching the highest recorded peaks. The subseries plot reinforces this: the blue monthly means are stable over time with no directional drift, consistent with the stationarity confirmed by the ADF and KPSS tests. Winter months (January–April) show considerably wider spread around their means than summer months, reflecting the greater sensitivity of low-reservoir conditions to year-specific hydrological variability
+**Description:**
+The seasonal and subseries plots confirm the strong and stable annual cycle in Norwegian reservoir fill rates. 
 
-#Stationary test
-```{r stationary test}
+As shown in the seasonal plot, reservoirs follow a consistent S-shaped pattern each year: draining through winter to a trough in March–April (typically 0.20–0.35), refilling rapidly through May–July driven by snowmelt, and reaching peak levels of 0.75–0.95 between August and October before the draw-down restarts. This shape is remarkably uniform across all 30 years — year-to-year variation manifests in the level rather than the shape, with dry years such as 2002 and 2010 visibly below the rest and wet years like 2020 reaching the highest recorded peaks.
+
+The subseries plot reinforces this: the blue monthly means are stable over time with no directional drift, consistent with the stationarity confirmed by the ADF and KPSS tests. Winter months (January–April) show considerably wider spread around their means than summer months, reflecting the greater sensitivity of low-reservoir conditions to year-specific hydrological variability
+
+## Stationary Test
+
+```{r stationary-test}
 cat("=== ADF Test: Fill Rate ===\n")
 adf.test(fill_rate_monthly$fill_rate_mean)
 
@@ -830,10 +925,12 @@ cat("\n=== Differences needed: Fill Rate ===\n")
 fill_rate_monthly %>% features(fill_rate_mean, unitroot_ndiffs)
 fill_rate_monthly %>% features(fill_rate_mean, unitroot_nsdiffs)
 ```
-The ADF test strongly rejects the null of a unit root (Dickey-Fuller = −6.01, p = 0.01) and the KPSS test fails to reject stationarity (stat = 0.026, p = 0.10) — both tests agree, confirming the series is stationary in levels. This stands in contrast to the hydro generation series in section 5, where ADF and KPSS conflicted due to the strong seasonal pattern. No regular differencing is required (ndiffs = 0), though one seasonal difference is indicated (nsdiffs = 1), reflecting the pronounced annual cycle visible in the seasonal plots.
+**Interpretation:**
+The ADF test strongly rejects the null of a unit root (Dickey-Fuller = −6.0138, p = 0.01) and the KPSS test fails to reject stationarity (stat = 0.0256, p = 0.10) — both tests agree, confirming the series is stationary in levels. This stands in contrast to the hydro generation series in section 5, where ADF and KPSS conflicted due to the strong seasonal pattern. No regular differencing is required (ndiffs = 0), though one seasonal difference is indicated (nsdiffs = 1), reflecting the pronounced annual cycle visible in the seasonal plots.
 
-## structural break testing
-```{r}
+## Structural Break Test
+
+```{r structural-break-test}
 fill_df <- fill_rate_monthly %>%
   as_tibble() %>%
   mutate(Lag1 = lag(fill_rate_mean)) %>%
@@ -849,10 +946,12 @@ sctest(qlr_fill, type = "supF")
 plot(qlr_fill, main = "Sup-F Test: Reservoir Fill Rate")
 lines(breakpoints(qlr_fill))
 ```
-The Sup-F (QLR) test finds no evidence of a structural break in the reservoir fill rate series (sup.F = 1.01, p = 1.00). As visible in the plot, the F-statistics computed at every candidate breakpoint across the full sample remain essentially flat and close to zero throughout, never approaching the 5% critical value shown by the red horizontal line (~11.7). The maximum F-statistic of just 1.01 — with a p-value of 1 — means the null hypothesis of parameter stability cannot be rejected at any conventional significance level. The fill rate series has therefore maintained stable statistical properties across the entire 30-year sample, with no policy change, drought cycle, or climate shift producing a detectable permanent shift in its dynamics.
+**Interpretation:**
+The Sup-F (QLR) test finds no evidence of a structural break in the reservoir fill rate series (sup.F = 1.0141, p = 1.00). As visible in the plot, the F-statistics computed at every candidate breakpoint across the full sample remain essentially flat and close to zero throughout, never approaching the 5% critical value shown by the red horizontal line (~11.7). The maximum F-statistic of just 1.0141 — with a p-value of 1 — means the null hypothesis of parameter stability cannot be rejected at any conventional significance level. The fill rate series has therefore maintained stable statistical properties across the entire 30-year sample, with no policy change, drought cycle, or climate shift producing a detectable permanent shift in its dynamics.
 
+## Joining Data
 
-```{r join data}
+```{r join-data}
 # Join fill rate with hydro production and create lagged fill rate variable
 reservoir_fill_rate <- hydro %>%
   inner_join(fill_rate_monthly, by = "Month") %>%
@@ -867,12 +966,13 @@ reservoir_fill_rate <- hydro %>%
 # Inspect
 glimpse(reservoir_fill_rate)
 ```
-```{r gap checking}
+```{r gap-check}
 reservoir_fill_rate %>% has_gaps()
 reservoir_fill_rate %>% scan_gaps()
 ```
 
 ## CCF
+
 ```{r CCF}
 ccf_data <- reservoir_fill_rate %>%
   as_tibble() %>%
@@ -883,8 +983,7 @@ ccf(ccf_data$fill_rate_pct, ccf_data$TWh,
     main = "CCF: Reservoir Fill Rate vs Hydro Generation")
 ```
 
-
-```{r seasonal dif CCF}
+```{r seasonal-dif-CCF}
 # Create seasonally differenced series for CCF
 ccf_diff_data <- reservoir_fill_rate %>%
   as_tibble() %>%
@@ -909,11 +1008,12 @@ adf.test(ccf_diff_data$TWh_sdiff)
 cat("\n=== ADF: Fill Rate (seasonally differenced) ===\n")
 adf.test(ccf_diff_data$fill_rate_sdiff)
 ```
-The CCF on the seasonally differenced series reveals a strong positive cross-correlation at lag 0 (~0.70) and lag 1 (~0.65), both well above the significance bounds. This confirms two things: fill rate and hydro generation move together contemporaneously, and last month's fill rate remains a strong predictor of current generation even after accounting for seasonality. The lag-1 specification used in the ARIMAX model is therefore empirically justified — it captures the most informative predictive signal available from the regressor while avoiding simultaneity between the dependent variable and the regressor at the same time period.
+**Interpretation:**
+The CCF on the seasonally differenced series reveals a strong positive cross-correlation at lag 0 (≈0.70) and lag 1 (≈0.65), both well above the significance bounds. This confirms two things: fill rate and hydro generation move together contemporaneously, and last month's fill rate remains a strong predictor of current generation even after accounting for seasonality. The lag-1 specification used in the ARIMAX model is therefore empirically justified — it captures the most informative predictive signal available from the regressor while avoiding simultaneity between the dependent variable and the regressor at the same time period.
 
 Both series reject non-stationarity strongly (p = 0.01, the minimum reportable value). This confirms that seasonal differencing was sufficient to achieve stationarity in both hydro generation and fill rate.
 
-## Correlation test
+## Correlation Test
 
 ```{r correlation}
 cat("=== Pearson Correlation: Fill Rate (lag 1) vs Hydro ===\n")
@@ -921,12 +1021,13 @@ cor.test(reservoir_fill_rate$fill_rate_pct_lag1,
          reservoir_fill_rate$TWh,
          method = "pearson")
 ```
+**Description:**
 r = 0.447 → moderate positive linear correlation between last month's fill rate and this month's hydro generation.
 
-## Prepare data for Granger and VAR
+## Preparing Data for Granger and VAR
 
-```{r}
-## Prepare data for Granger and VAR
+```{r preparation-Granger-VAR}
+# Prepare data for Granger and VAR
 
 var_tsibble <- reservoir_fill_rate %>%
   mutate(
@@ -937,10 +1038,10 @@ var_tsibble <- reservoir_fill_rate %>%
   select(Month, TWh_sdiff, fill_rate_sdiff)
 ```
 
-## Plot seasonally differenced series
+## Plot Seasonally Differenced Series
 
-```{r}
-## Plot seasonally differenced series
+```{r plot-seasonally-dif-series}
+# Plot seasonally differenced series
 
 var_tsibble %>%
   pivot_longer(
@@ -960,10 +1061,10 @@ var_tsibble %>%
   theme(plot.title = element_text(hjust = 0.5))
 ```
 
-## Granger
+## Granger Test
 
 ```{r granger}
-## Granger causality tests
+# Granger causality tests
 
 granger_data <- var_tsibble %>%
   as.data.frame()
@@ -978,13 +1079,13 @@ grangertest(fill_rate_sdiff ~ TWh_sdiff,
             order = 1,
             data = granger_data)
 ```
-The Granger causality tests indicate a strongly significant predictive relationship from reservoir fill rate to hydro generation (F = 86.27, p < 0.001). This suggests that last month’s reservoir fill rate contains substantial information for predicting current hydro generation beyond the series’ own history. The reverse direction is also statistically significant but much weaker (F = 5.50, p = 0.020), indicating some bidirectional predictive relationship. However, the dominant predictive channel runs from reservoir fill rate to hydro generation.
+**Interpretation:**
+The Granger causality tests indicate a strongly significant predictive relationship from reservoir fill rate to hydro generation (F = 86.269, p < 0.001). This suggests that last month’s reservoir fill rate contains substantial information for predicting current hydro generation beyond the series’ own history. The reverse direction is also statistically significant but much weaker (F = 5.4962, p = 0.0196), indicating some bidirectional predictive relationship. However, the dominant predictive channel runs from reservoir fill rate to hydro generation.
 
-##VAR Modelling
+## VAR Modelling
 
 ```{r VAR}
-## VAR models
-
+# VAR models
 fit_var <- var_tsibble %>%
   model(
     aicc = fable::VAR(vars(TWh_sdiff, fill_rate_sdiff)),
@@ -993,51 +1094,56 @@ fit_var <- var_tsibble %>%
 
 fit_var
 ```
+**Interpretation:**
 AICC --> Prefers richer model, better for forecasting
 BIC --> Penalises complexity more, prefers parsimony
 
 ## Compare VAR models
 
-```{r plot series}
-## Compare VAR models
+```{r VAR-model-comparison}
+# Compare VAR models
 
 glance(fit_var) %>%
   select(.model, AIC, AICc, BIC) %>%
   arrange(AICc)
 ```
-
+**Interpretation:**
 The information criteria compare the AICc-selected VAR model with the BIC-selected VAR model. Lower values indicate a better trade-off between model fit and complexity. The AICc model has the lowest AIC and AICc, so it is preferred if the goal is forecasting. The BIC model has the lowest BIC, meaning it is more parsimonious and penalizes complexity more strongly. For this project, the AICc model is more relevant for forecast performance, while the BIC model is useful as a simpler robustness check.
 
-## VAR coefficients
-```{r}
+## VAR Coefficients
+
+```{r VAR-coef}
 fit_var %>%
   tidy() %>%
   select(.model, term, .response, estimate, std.error, statistic, p.value)
 ```
-
+**Interpretation:**
 The VAR coefficient estimates show that reservoir fill rate contains significant predictive information for hydro generation. In both the AICc and BIC specifications, the first lag of reservoir fill rate enters the hydro equation positively and is highly statistically significant. Hydro generation is also strongly persistent, as its own first lag is positive and significant in both models. In the fill-rate equation, the strongest effects come from the fill rate’s own lagged values, indicating substantial persistence in reservoir conditions. Overall, the coefficient estimates support the Granger causality results: the dominant predictive channel runs from reservoir fill rate to hydro generation, although some bidirectional dynamics are also present.
 
-## Residual diagnostics: hydro equation
-```{r}
+## Residual Diagnostics: Hydro Equation
+
+```{r residual-diagnostics-hydro}
 fit_var %>%
   select(aicc) %>%
   residuals() %>%
   gg_tsdisplay(TWh_sdiff, plot_type = "hist")
 ```
+**Interpretation:**
 The residual diagnostics for the hydro equation show that most residuals fluctuate around zero, which is desirable. However, the ACF plot shows a clear significant spike at lag 12. This indicates that some seasonal autocorrelation remains in the hydro residuals, meaning the VAR model has not fully captured the annual seasonal pattern. The histogram is roughly centered around zero but shows some extreme observations, suggesting occasional hydro shocks remain unexplained. Overall, the VAR captures part of the dynamics, but the residuals are not fully white noise.
 
-## Residual diagnostics: fill-rate equation
+## Residual diagnostics: Fill Rate Equation
 
-```{r}
+```{r residual-diagnostics-fill-rate}
 fit_var %>%
   select(aicc) %>%
   residuals() %>%
   gg_tsdisplay(fill_rate_sdiff, plot_type = "hist")
 ```
-
+**Interpretation:**
 The residual diagnostics for the fill-rate equation show that the residuals fluctuate around zero, which is generally desirable. However, the ACF plot shows a clear significant spike at lag 12. This indicates that some annual seasonal autocorrelation remains in the residuals. The histogram is roughly centered around zero but has relatively wide tails, suggesting that some larger reservoir shocks remain unexplained. Overall, the VAR captures part of the fill-rate dynamics, but the residuals are not fully white noise.
 
 ## ARIMAX
+
 ```{r ARIMAX_fill_rate}
 train_arimax_fill_rate <- reservoir_fill_rate %>%
   filter(Month <= max(Month) - 24)
@@ -1056,13 +1162,11 @@ glance(fit_arimax_fill_rate)
 ```
 
 ## Model Insights: Fill Rate
+
 This section evaluates whether reservoir fill rate improves the forecasting model.
 
-```{r arimax_model_insights_fill_rate, message=FALSE, warning=FALSE}
-# ==============================================================================
+```{r ARIMAX_model_insights_fill_rate, message=FALSE, warning=FALSE}
 # 1. Inspect the selected ARIMAX model
-# ==============================================================================
-
 fit_arimax_fill_rate %>%
   select(ARIMAX_Auto) %>%
   report()
@@ -1078,10 +1182,7 @@ coef_arimax_fill_rate %>%
     caption = "ARIMAX_Auto coefficient estimates — fill rate regressor"
   )
 
-# ==============================================================================
-# 2. Forecast performance of ARIMAX candidates
-# ==============================================================================
-
+# 2. Forecast performance of ARIMAX
 fc_arimax_fill_rate <- fit_arimax_fill_rate %>%
   forecast(new_data = test_arimax_fill_rate)
 
@@ -1091,11 +1192,10 @@ accuracy(fc_arimax_fill_rate, reservoir_fill_rate) %>%
   kable(
     digits  = 3,
     align   = "c",
-    caption = "Forecast accuracy of ARIMAX fill rate candidate models"
+    caption = "Forecast accuracy of ARIMAX fill rate model"
   )
 
 # 3. Residual diagnostics for the selected ARIMAX model
-
 fit_arimax_fill_rate %>%
   select(ARIMAX_Auto) %>%
   gg_tsresiduals()
@@ -1110,10 +1210,7 @@ lb_arimax_fill_rate_auto_dof6 <- augment(fit_arimax_fill_rate %>% select(ARIMAX_
 
 lb_arimax_fill_rate_auto_dof6
 
-# ==============================================================================
-# 4. Refit all benchmark models on the common ARIMAX sample
-# ==============================================================================
-
+# 4. Refit benchmark model on the common ARIMAX sample
 fit_common_fill_rate <- train_arimax_fill_rate %>%
   model(
     ARIMAX_Auto    = ARIMA(TWh ~ fill_rate_pct_lag1)
@@ -1128,10 +1225,7 @@ glance(fit_common_fill_rate) %>%
     caption = "Information criteria — common sample, fill rate regressor"
   )
 
-# ==============================================================================
 # 5. Final out-of-sample forecast comparison
-# ==============================================================================
-
 fc_common_fill_rate <- fit_common_fill_rate %>%
   forecast(new_data = test_arimax_fill_rate)
 
@@ -1144,10 +1238,7 @@ accuracy(fc_common_fill_rate, reservoir_fill_rate) %>%
     caption = "Forecast accuracy on the common 24-month test set — fill rate"
   )
 
-# ==============================================================================
 # 6. Forecast plot
-# ==============================================================================
-
 fc_common_fill_rate %>%
   filter(.model %in% c("ETS", "Airline_SARIMA", "ARIMAX_Auto")) %>%
   autoplot(reservoir_fill_rate, level = 80) +
@@ -1160,11 +1251,9 @@ fc_common_fill_rate %>%
   theme(legend.position = "bottom")
 ```
 
-
-
 ## Comparing ARIMAX and VAR
 
-```{r arimax-var-comparison}
+```{r ARIMAX-VAR-comparison}
 # Plot 1 — ARIMAX vs Airline benchmark (levels scale)
 bind_rows(
   fc_common_fill_rate %>%
@@ -1212,11 +1301,12 @@ fc_var_tidy %>%
     title    = "24-Month Forecast: VAR(AICc) — Hydro Equation (2020 onwards)",
     subtitle = "Seasonally differenced scale",
     y        = "Differenced TWh",
-    x        = NULL
+    x = NULL
   ) +
   theme(legend.position = "bottom")
 ```
-------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
 
 # Appendix — Save Processed Data
 
