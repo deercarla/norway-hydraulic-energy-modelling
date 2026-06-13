@@ -451,6 +451,18 @@ kpss.test(na.omit(hydro$diff_TWh))
 **Interpretation:**
 After first differencing the conflict is resolved, confirming the differenced series is stationary and suitable for ARIMA modelling.
 
+## 12 month Differencing and Re-Testing
+
+```{r twelve-month-diff}
+hydro <- hydro %>%
+  mutate(sdiff_TWh = difference(TWh, lag = 12))   # seasonal difference at lag 12
+
+cat("=== ADF Test (seasonal difference, D = 1) ===\n")
+adf.test(na.omit(hydro$sdiff_TWh))
+
+cat("\n=== KPSS Test (seasonal difference, D = 1) ===\n")
+kpss.test(na.omit(hydro$sdiff_TWh))
+```
 --------------------------------------------------------------------------------
 
 # Structural Break Analysis
